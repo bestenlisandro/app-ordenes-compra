@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  BORRADOR
+  ENVIADA
+  APROBADA
+  RECIBIDA
+  CANCELADA
+}
+
+model Supplier {
+  id             Int             @id @default(autoincrement())
+  nombre         String
+  taxId          String          @unique
+  email          String?
+  telefono       String?
+  direccion      String?
+  ordenesCompra  PurchaseOrder[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Item {
+  id             Int         @id @default(autoincrement())
+  codigo         String      @unique
+  descripcion    String
+  precioUnitario Decimal     @default(0)
+  stockActual    Decimal     @default(0)
+  stockMinimo    Decimal     @default(0)
+  detallesOrden  OrderItem[]
+  movimientosStock StockMovement[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model StockMovement {
+  id          Int      @id @default(autoincrement())
+  productoId  Int
+  producto    Item     @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  tipo        String
+  cantidad    Decimal
+  motivo      String?
+  createdAt   DateTime @default(now())
+}
+
+model PurchaseOrder {
+  id                       Int         @id @default(autoincrement())
+  numeroOrden              String      @unique
+  proveedorId              Int
+  proveedor                Supplier    @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  fechaEmision             DateTime    @default(now())
+  fechaEntregaEsperada     DateTime?
+  estado                   OrderStatus @default(BORRADOR)
+  subtotal                 Decimal     @default(0)
+  impuestos                Decimal     @default(0)
+  total                    Decimal     @default(0)
+  observaciones            String?
+  items                    OrderItem[]
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+}
+
+model OrderItem {
+  id             Int           @id @default(autoincrement())
+  ordenId        Int
+  productoId     Int
+  orden          PurchaseOrder @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  producto       Item          @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  cantidad       Decimal
+  precioUnitario Decimal
+  subtotalLinea  Decimal
+}
