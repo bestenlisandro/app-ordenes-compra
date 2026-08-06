@@ -39,4 +39,4 @@ Para una base PostgreSQL, cambie el `provider` de Prisma por `postgresql`, ajust
 
 ## Publicación en Render
 
-El archivo `render.yaml` prepara el servicio para Render con un disco persistente, necesario para conservar la base SQLite. En Render, cree un servicio desde este repositorio y seleccione un plan con disco persistente. La aplicación quedará disponible con una URL pública.
+El archivo `render.yaml` prepara una publicación sin costo en Render. Para conservar los datos, conecte la variable `DATABASE_URL` a una base PostgreSQL de Supabase. El servicio gratuito puede tardar alrededor de un minuto en responder después de 15 minutos sin uso; Supabase Free admite hasta 500 MB y puede pausarse si no hay actividad durante una semana.
