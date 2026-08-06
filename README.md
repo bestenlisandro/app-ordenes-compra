@@ -36,3 +36,7 @@ Abra `http://localhost:5173`. La API queda en `http://localhost:4000`.
 - **Reportes:** gráficos de compras por proveedor y órdenes agrupadas por estado.
 
 Para una base PostgreSQL, cambie el `provider` de Prisma por `postgresql`, ajuste `DATABASE_URL` y ejecute `npm run db:push`.
+
+## Publicación en Render
+
+El archivo `render.yaml` prepara el servicio para Render con un disco persistente, necesario para conservar la base SQLite. En Render, cree un servicio desde este repositorio y seleccione un plan con disco persistente. La aplicación quedará disponible con una URL pública.

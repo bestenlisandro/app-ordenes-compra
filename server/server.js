@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { PrismaClient, OrderStatus } = require('@prisma/client');
 
 const app = express();
@@ -126,4 +127,14 @@ app.get('/api/reports/purchases', async (_req, res) => {
 });
 
 app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'Error interno del servidor.' }); });
+
+// En producción Express entrega la interfaz compilada y la API desde una sola URL.
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.join(__dirname, '..', 'dist');
+  app.use(express.static(distPath));
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api/')) return res.sendFile(path.join(distPath, 'index.html'));
+    next();
+  });
+}
 app.listen(PORT, () => console.log(`API disponible en http://localhost:${PORT}`));

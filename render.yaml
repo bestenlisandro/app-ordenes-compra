@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: app-ordenes-compra
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run db:generate && npm run build
+    startCommand: npm run start:render
+    healthCheckPath: /api/orders
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TAX_RATE
+        value: "0.21"
+      - key: DATABASE_URL
+        value: file:/var/data/dev.db
+    disk:
+      name: ordenes-compra-data
+      mountPath: /var/data
+      sizeGB: 1
