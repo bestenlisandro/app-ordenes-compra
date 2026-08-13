@@ -16,55 +16,114 @@ enum OrderStatus {
 }
 
 model Supplier {
-  id             Int             @id @default(autoincrement())
-  nombre         String
-  taxId          String          @unique
-  email          String?
-  telefono       String?
-  direccion      String?
-  ordenesCompra  PurchaseOrder[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id            Int             @id @default(autoincrement())
+  nombre        String
+  taxId         String          @unique
+  email         String?
+  telefono      String?
+  contacto      String?
+  razonSocial   String?
+  tiempoEntrega Int?
+  direccion     String?
+  ciudad        String?
+  provincia     String?
+  pais          String?
+  ofertas       SupplierItem[]
+  ordenesCompra PurchaseOrder[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 }
 
 model Item {
-  id             Int         @id @default(autoincrement())
-  codigo         String      @unique
-  descripcion    String
-  precioUnitario Decimal     @default(0)
-  stockActual    Decimal     @default(0)
-  stockMinimo    Decimal     @default(0)
-  detallesOrden  OrderItem[]
+  id               Int             @id @default(autoincrement())
+  codigo           String          @unique
+  descripcion      String
+  marca            String?
+  categoria        String?
+  familia          String?
+  subfamilia       String?
+  estado           String          @default("ACTIVO")
+  unidadMedida     String?
+  unidadCompra     String?
+  factorConversion Decimal         @default(1)
+  codigoQr         String?
+  puntoPedido      Decimal         @default(0)
+  precioUnitario   Decimal         @default(0)
+  stockActual      Decimal         @default(0)
+  stockMinimo      Decimal         @default(0)
+  stockMaximo      Decimal?
+  ubicacion        String?
+  costoEstandar    Decimal         @default(0)
+  iva              Decimal         @default(21)
+  atributosTecnicos String?
+  documentacionUrl String?
+  detallesOrden    OrderItem[]
   movimientosStock StockMovement[]
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  ofertas          SupplierItem[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model SupplierItem {
+  id                      Int       @id @default(autoincrement())
+  proveedorId             Int
+  productoId              Int
+  proveedor               Supplier  @relation(fields: [proveedorId], references: [id], onDelete: Cascade)
+  producto                Item      @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  nombreProveedor         String?
+  codigoProveedor         String?
+  marcaProveedor          String?
+  esPreferido             Boolean   @default(false)
+  tiempoEntrega           Int?
+  loteMinimo              Decimal   @default(1)
+  precioSinIva            Decimal   @default(0)
+  precioConIva            Decimal   @default(0)
+  moneda                  String    @default("ARS")
+  fechaActualizacionCosto DateTime?
+
+  @@unique([proveedorId, productoId])
 }
 
 model StockMovement {
-  id          Int      @id @default(autoincrement())
-  productoId  Int
-  producto    Item     @relation(fields: [productoId], references: [id], onDelete: Cascade)
-  tipo        String
-  cantidad    Decimal
-  motivo      String?
-  createdAt   DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  productoId Int
+  producto   Item     @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  tipo       String
+  cantidad   Decimal
+  motivo     String?
+  createdAt  DateTime @default(now())
 }
 
 model PurchaseOrder {
-  id                       Int         @id @default(autoincrement())
-  numeroOrden              String      @unique
-  proveedorId              Int
-  proveedor                Supplier    @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
-  fechaEmision             DateTime    @default(now())
-  fechaEntregaEsperada     DateTime?
-  estado                   OrderStatus @default(BORRADOR)
-  subtotal                 Decimal     @default(0)
-  impuestos                Decimal     @default(0)
-  total                    Decimal     @default(0)
-  observaciones            String?
-  items                    OrderItem[]
-  createdAt                DateTime    @default(now())
-  updatedAt                DateTime    @updatedAt
+  id                     Int         @id @default(autoincrement())
+  numeroOrden            String      @unique
+  proveedorId            Int
+  proveedor              Supplier    @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  fechaEmision           DateTime    @default(now())
+  fechaEntregaEsperada   DateTime?
+  estado                 OrderStatus @default(BORRADOR)
+  subtotal               Decimal     @default(0)
+  impuestos              Decimal     @default(0)
+  porcentajeImpuestos    Decimal     @default(21)
+  descuentos             Decimal     @default(0)
+  total                  Decimal     @default(0)
+  moneda                 String      @default("ARS")
+  lugarEntrega           String?
+  proveedorRazonSocial   String?
+  proveedorTaxId         String?
+  proveedorContacto      String?
+  proveedorDireccion     String?
+  proveedorDatosContacto String?
+  condicionesPago        String?
+  metodoEnvio            String?
+  direccionFacturacion   String?
+  autorizadoPor          String?
+  firmaAutorizacion      String?
+  terminosCondiciones    String?
+  observaciones          String?
+  items                  OrderItem[]
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
 }
 
 model OrderItem {
@@ -76,4 +135,6 @@ model OrderItem {
   cantidad       Decimal
   precioUnitario Decimal
   subtotalLinea  Decimal
+  codigoProveedor String?
+  nombreProveedor String?
 }

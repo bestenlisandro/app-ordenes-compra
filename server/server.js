@@ -23,6 +23,79 @@ function requiredString(value, field) {
   return value.trim();
 }
 
+function optionalString(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function supplierData(body) {
+  const tiempoEntrega = body.tiempoEntrega === '' || body.tiempoEntrega == null ? null : Number(body.tiempoEntrega);
+  if (tiempoEntrega != null && (!Number.isInteger(tiempoEntrega) || tiempoEntrega < 0)) throw new Error('El tiempo de entrega debe ser una cantidad de días válida.');
+  return {
+    nombre: requiredString(body.nombre, 'nombre'),
+    taxId: requiredString(body.taxId, 'CUIT/TaxID'),
+    email: optionalString(body.email),
+    telefono: optionalString(body.telefono),
+    contacto: optionalString(body.contacto),
+    razonSocial: optionalString(body.razonSocial),
+    tiempoEntrega,
+    direccion: optionalString(body.direccion),
+    ciudad: optionalString(body.ciudad),
+    provincia: optionalString(body.provincia),
+    pais: optionalString(body.pais),
+  };
+}
+
+function materialData(body) {
+  const puntoPedido = body.puntoPedido === '' || body.puntoPedido == null ? 0 : Number(body.puntoPedido);
+  if (!Number.isFinite(puntoPedido) || puntoPedido < 0) throw new Error('El punto de pedido debe ser un número válido.');
+  const ofertas = Array.isArray(body.ofertas) ? body.ofertas.map((oferta) => {
+    const proveedorId = Number(oferta.proveedorId);
+    const precioSinIva = Number(oferta.precioSinIva || 0);
+    const precioConIva = Number(oferta.precioConIva || 0);
+    if (!Number.isInteger(proveedorId) || proveedorId <= 0) throw new Error('Cada oferta debe tener un proveedor.');
+    if (precioSinIva < 0 || precioConIva < 0) throw new Error('Los precios no pueden ser negativos.');
+    return {
+      proveedorId,
+      nombreProveedor: optionalString(oferta.nombreProveedor),
+      codigoProveedor: optionalString(oferta.codigoProveedor),
+      marcaProveedor: optionalString(oferta.marcaProveedor),
+      esPreferido: Boolean(oferta.esPreferido),
+      tiempoEntrega: oferta.tiempoEntrega === '' || oferta.tiempoEntrega == null ? null : Number(oferta.tiempoEntrega),
+      loteMinimo: oferta.loteMinimo === '' || oferta.loteMinimo == null ? 1 : Number(oferta.loteMinimo),
+      precioSinIva,
+      precioConIva,
+      moneda: optionalString(oferta.moneda) || 'ARS',
+      fechaActualizacionCosto: oferta.fechaActualizacionCosto ? new Date(oferta.fechaActualizacionCosto) : null,
+    };
+  }) : [];
+  if (new Set(ofertas.map((oferta) => oferta.proveedorId)).size !== ofertas.length) throw new Error('Un proveedor no puede repetirse en el mismo material.');
+  return {
+    item: {
+      codigo: requiredString(body.codigo, 'código'),
+      descripcion: requiredString(body.descripcion, 'nombre del material'),
+      marca: optionalString(body.marca),
+      categoria: optionalString(body.categoria),
+      familia: optionalString(body.familia),
+      subfamilia: optionalString(body.subfamilia),
+      estado: optionalString(body.estado) || 'ACTIVO',
+      unidadMedida: optionalString(body.unidadMedida),
+      unidadCompra: optionalString(body.unidadCompra),
+      factorConversion: body.factorConversion === '' || body.factorConversion == null ? 1 : Number(body.factorConversion),
+      codigoQr: optionalString(body.codigoQr),
+      puntoPedido,
+      stockMinimo: puntoPedido,
+      stockMaximo: body.stockMaximo === '' || body.stockMaximo == null ? null : Number(body.stockMaximo),
+      ubicacion: optionalString(body.ubicacion),
+      costoEstandar: body.costoEstandar === '' || body.costoEstandar == null ? 0 : Number(body.costoEstandar),
+      iva: body.iva === '' || body.iva == null ? 21 : Number(body.iva),
+      atributosTecnicos: optionalString(body.atributosTecnicos),
+      documentacionUrl: optionalString(body.documentacionUrl),
+      precioUnitario: ofertas[0]?.precioSinIva || 0,
+    },
+    ofertas,
+  };
+}
+
 function handleError(res, error) {
   console.error(error);
   if (error.code === 'P2002') return res.status(409).json({ error: 'Ya existe un registro con ese valor único.' });
@@ -33,20 +106,20 @@ function handleError(res, error) {
 // CRUD de proveedores
 app.get('/api/suppliers', async (_req, res) => res.json(await prisma.supplier.findMany({ orderBy: { nombre: 'asc' } })));
 app.post('/api/suppliers', async (req, res) => {
-  try { res.status(201).json(await prisma.supplier.create({ data: { nombre: requiredString(req.body.nombre, 'nombre'), taxId: requiredString(req.body.taxId, 'CUIT/TaxID'), email: req.body.email || null, telefono: req.body.telefono || null, direccion: req.body.direccion || null } })); } catch (e) { handleError(res, e); }
+  try { res.status(201).json(await prisma.supplier.create({ data: supplierData(req.body) })); } catch (e) { handleError(res, e); }
 });
 app.put('/api/suppliers/:id', async (req, res) => {
-  try { res.json(await prisma.supplier.update({ where: { id: Number(req.params.id) }, data: { nombre: requiredString(req.body.nombre, 'nombre'), taxId: requiredString(req.body.taxId, 'CUIT/TaxID'), email: req.body.email || null, telefono: req.body.telefono || null, direccion: req.body.direccion || null } })); } catch (e) { handleError(res, e); }
+  try { res.json(await prisma.supplier.update({ where: { id: Number(req.params.id) }, data: supplierData(req.body) })); } catch (e) { handleError(res, e); }
 });
 app.delete('/api/suppliers/:id', async (req, res) => { try { await prisma.supplier.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
 
 // CRUD de productos
-app.get('/api/items', async (_req, res) => res.json(await prisma.item.findMany({ orderBy: { codigo: 'asc' } })));
+app.get('/api/items', async (_req, res) => res.json(await prisma.item.findMany({ include: { ofertas: { include: { proveedor: true } } }, orderBy: { codigo: 'asc' } })));
 app.post('/api/items', async (req, res) => {
-  try { const precio = Number(req.body.precioUnitario); if (!(precio > 0)) throw new Error('El precio unitario debe ser mayor a cero.'); res.status(201).json(await prisma.item.create({ data: { codigo: requiredString(req.body.codigo, 'código'), descripcion: requiredString(req.body.descripcion, 'descripción'), precioUnitario: precio } })); } catch (e) { handleError(res, e); }
+  try { const data = materialData(req.body); res.status(201).json(await prisma.item.create({ data: { ...data.item, ofertas: { create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
 });
 app.put('/api/items/:id', async (req, res) => {
-  try { const precio = Number(req.body.precioUnitario); if (!(precio > 0)) throw new Error('El precio unitario debe ser mayor a cero.'); res.json(await prisma.item.update({ where: { id: Number(req.params.id) }, data: { codigo: requiredString(req.body.codigo, 'código'), descripcion: requiredString(req.body.descripcion, 'descripción'), precioUnitario: precio } })); } catch (e) { handleError(res, e); }
+  try { const data = materialData(req.body); res.json(await prisma.item.update({ where: { id: Number(req.params.id) }, data: { ...data.item, ofertas: { deleteMany: {}, create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
 });
 app.delete('/api/items/:id', async (req, res) => { try { await prisma.item.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
 
@@ -71,11 +144,19 @@ app.post('/api/stock/movements', async (req, res) => {
 
 app.post('/api/orders', async (req, res) => {
   try {
-    const { proveedorId, fechaEntregaEsperada, observaciones, items } = req.body;
+    const {
+      proveedorId, fechaEntregaEsperada, lugarEntrega, observaciones, items,
+      proveedorRazonSocial, proveedorTaxId, proveedorContacto, proveedorDireccion,
+      proveedorDatosContacto, porcentajeImpuestos, descuentos, moneda,
+      condicionesPago, metodoEnvio, direccionFacturacion, autorizadoPor,
+      firmaAutorizacion, terminosCondiciones,
+    } = req.body;
     if (!Number.isInteger(proveedorId)) throw new Error('Debe seleccionar un proveedor.');
     if (!Array.isArray(items) || items.length === 0) throw new Error('La orden debe tener al menos un ítem.');
+    const proveedor = await prisma.supplier.findUnique({ where: { id: proveedorId } });
+    if (!proveedor) throw new Error('El proveedor seleccionado no existe.');
     const productIds = items.map((item) => Number(item.productoId));
-    const products = await prisma.item.findMany({ where: { id: { in: productIds } } });
+    const products = await prisma.item.findMany({ where: { id: { in: productIds } }, include: { ofertas: true } });
     if (products.length !== new Set(productIds).size) throw new Error('Uno o más productos no existen.');
     const productById = new Map(products.map((product) => [product.id, product]));
     const lineas = items.map((item) => {
@@ -84,12 +165,41 @@ app.post('/api/orders', async (req, res) => {
       if (!producto || !(cantidad > 0)) throw new Error('Cada ítem debe tener producto y cantidad mayor a cero.');
       const precioUnitario = item.precioUnitario == null ? decimal(producto.precioUnitario) : Number(item.precioUnitario);
       if (!(precioUnitario > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
-      return { productoId: producto.id, cantidad, precioUnitario, subtotalLinea: cantidad * precioUnitario };
+      const equivalencia = producto.ofertas.find((oferta) => oferta.proveedorId === proveedorId);
+      return {
+        productoId: producto.id, cantidad, precioUnitario, subtotalLinea: cantidad * precioUnitario,
+        codigoProveedor: equivalencia?.codigoProveedor || producto.codigo,
+        nombreProveedor: equivalencia?.nombreProveedor || producto.descripcion,
+      };
     });
     const subtotal = lineas.reduce((sum, item) => sum + item.subtotalLinea, 0);
-    const impuestos = subtotal * TAX_RATE;
-    const numeroOrden = `OC-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-    const order = await prisma.purchaseOrder.create({ data: { numeroOrden, proveedorId, fechaEntregaEsperada: fechaEntregaEsperada ? new Date(fechaEntregaEsperada) : null, observaciones: observaciones?.trim() || null, subtotal, impuestos, total: subtotal + impuestos, items: { create: lineas } }, include: includesOrder });
+    const tasa = porcentajeImpuestos === '' || porcentajeImpuestos == null ? TAX_RATE * 100 : Number(porcentajeImpuestos);
+    const descuento = descuentos === '' || descuentos == null ? 0 : Number(descuentos);
+    if (!Number.isFinite(tasa) || tasa < 0 || tasa > 100) throw new Error('El porcentaje de impuestos debe estar entre 0 y 100.');
+    if (!Number.isFinite(descuento) || descuento < 0 || descuento > subtotal) throw new Error('El descuento debe ser válido y no superar el subtotal.');
+    const impuestos = subtotal * tasa / 100;
+    const fechaEntrega = fechaEntregaEsperada ? new Date(`${fechaEntregaEsperada}T12:00:00`) : null;
+    if (fechaEntrega && Number.isNaN(fechaEntrega.getTime())) throw new Error('La fecha de entrega no es válida.');
+    const provisional = `PENDIENTE-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const baseData = {
+      numeroOrden: provisional, proveedorId, fechaEntregaEsperada: fechaEntrega,
+      lugarEntrega: optionalString(lugarEntrega), observaciones: optionalString(observaciones),
+      proveedorRazonSocial: optionalString(proveedorRazonSocial) || proveedor.razonSocial || proveedor.nombre,
+      proveedorTaxId: optionalString(proveedorTaxId) || proveedor.taxId,
+      proveedorContacto: optionalString(proveedorContacto) || proveedor.contacto,
+      proveedorDireccion: optionalString(proveedorDireccion) || [proveedor.direccion, proveedor.ciudad, proveedor.provincia, proveedor.pais].filter(Boolean).join(', ') || null,
+      proveedorDatosContacto: optionalString(proveedorDatosContacto) || [proveedor.email, proveedor.telefono].filter(Boolean).join(' · ') || null,
+      porcentajeImpuestos: tasa, descuentos: descuento, moneda: optionalString(moneda) || 'ARS',
+      condicionesPago: optionalString(condicionesPago), metodoEnvio: optionalString(metodoEnvio),
+      direccionFacturacion: optionalString(direccionFacturacion), autorizadoPor: optionalString(autorizadoPor),
+      firmaAutorizacion: optionalString(firmaAutorizacion), terminosCondiciones: optionalString(terminosCondiciones),
+      subtotal, impuestos, total: subtotal + impuestos - descuento, items: { create: lineas },
+    };
+    const order = await prisma.$transaction(async (tx) => {
+      const created = await tx.purchaseOrder.create({ data: baseData });
+      const numeroOrden = `OC-${created.fechaEmision.getFullYear()}-${String(created.id).padStart(6, '0')}`;
+      return tx.purchaseOrder.update({ where: { id: created.id }, data: { numeroOrden }, include: includesOrder });
+    });
     res.status(201).json(order);
   } catch (e) { handleError(res, e); }
 });
