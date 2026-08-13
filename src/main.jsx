@@ -34,7 +34,7 @@ function App() {
     <header className="topbar">
       <div className="topbar-inner">
         <button className="brand" onClick={() => navigate('home')} aria-label="Ir al inicio">
-          <span className="brand-mark"><ClipboardList size={22}/></span>
+          <span className="brand-mark"><img src="/besten-logo.png" alt="" /></span>
           <span><strong>Besten Compras</strong><small>Gestión inteligente</small></span>
         </button>
         <nav className="desktop-nav" aria-label="Navegación principal">
