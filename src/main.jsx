@@ -1,32 +1,59 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ClipboardList, Plus, Building2, Package, BarChart3, List } from 'lucide-react';
+import { BarChart3, Boxes, Building2, ClipboardList, Home, List, Menu, PackageSearch, Plus, X } from 'lucide-react';
 import './styles.css';
+import HomeView from './components/HomeView';
+import Catalog from './components/Catalog';
 import OrderList from './components/OrderList';
 import OrderForm from './components/OrderForm';
 import Suppliers from './components/Suppliers';
 import Stock from './components/Stock';
+import Materials from './components/Materials';
 import Dashboard from './components/Dashboard';
 
+const navigation = [
+  ['home', 'Inicio', Home], ['catalog', 'Catálogo', PackageSearch], ['list', 'Órdenes', List],
+  ['suppliers', 'Proveedores', Building2], ['materials', 'Materiales', Boxes], ['stock', 'Stock', ClipboardList], ['dashboard', 'Reportes', BarChart3],
+];
+
 function App() {
-  const [view, setView] = useState('list');
+  const [view, setView] = useState('home');
   const [refreshKey, setRefreshKey] = useState(0);
-  const created = () => { setRefreshKey((key) => key + 1); setView('list'); };
-  return <main className="min-h-screen p-4 sm:p-8">
-    <div className="mx-auto max-w-7xl">
-      <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3"><span className="rounded-xl bg-blue-600 p-3 text-white"><ClipboardList /></span><div><h1 className="text-2xl font-bold text-slate-900">Órdenes de Compra</h1><p className="text-sm text-slate-500">Gestión de proveedores, productos y órdenes</p></div></div>
-        {view === 'list' && <button onClick={() => setView('new')} className="btn-primary"><Plus size={18} /> Nueva orden</button>}
-      </header>
-      <nav className="mb-6 flex flex-wrap gap-2" aria-label="Módulos principales">
-        {[['list', 'Órdenes', List], ['suppliers', 'Proveedores', Building2], ['stock', 'Stock', Package], ['dashboard', 'Reportes', BarChart3]].map(([id, label, Icon]) => <button key={id} onClick={() => setView(id)} className={view === id ? 'btn-primary py-2' : 'btn-secondary py-2'}><Icon size={16}/>{label}</button>)}
-      </nav>
-      {view === 'list' && <OrderList key={refreshKey} />}
-      {view === 'new' && <OrderForm onCancel={() => setView('list')} onCreated={created} />}
-      {view === 'suppliers' && <Suppliers />}
-      {view === 'stock' && <Stock />}
-      {view === 'dashboard' && <Dashboard />}
+  const [menuOpen, setMenuOpen] = useState(false);
+  const navigate = (next) => { setView(next); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const created = () => { setRefreshKey((key) => key + 1); navigate('list'); };
+  const content = {
+    home: <HomeView onNavigate={navigate} />,
+    catalog: <Catalog onCreateOrder={() => navigate('new')} />,
+    list: <OrderList key={refreshKey} />,
+    new: <OrderForm onCancel={() => navigate('list')} onCreated={created} />,
+    suppliers: <Suppliers />, materials: <Materials />, stock: <Stock />, dashboard: <Dashboard />,
+  }[view];
+
+  return <div className="app-shell">
+    <header className="topbar">
+      <div className="topbar-inner">
+        <button className="brand" onClick={() => navigate('home')} aria-label="Ir al inicio">
+          <span className="brand-mark"><ClipboardList size={22}/></span>
+          <span><strong>Besten Compras</strong><small>Gestión inteligente</small></span>
+        </button>
+        <nav className="desktop-nav" aria-label="Navegación principal">
+          {navigation.slice(0, 3).map(([id, label]) => <button key={id} onClick={() => navigate(id)} className={view === id ? 'active' : ''}>{label}</button>)}
+        </nav>
+        <div className="topbar-actions">
+          <button onClick={() => navigate('new')} className="btn-primary"><Plus size={17}/> Nueva orden</button>
+          <button className="menu-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Abrir menú" aria-expanded={menuOpen}>{menuOpen ? <X/> : <Menu/>}</button>
+        </div>
+      </div>
+    </header>
+    <div className="layout">
+      <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
+        <p className="sidebar-label">Espacio de trabajo</p>
+        <nav aria-label="Módulos de gestión">{navigation.map(([id, label, Icon]) => <button key={id} onClick={() => navigate(id)} className={view === id ? 'active' : ''}><Icon size={18}/><span>{label}</span></button>)}</nav>
+        <div className="sidebar-help"><PackageSearch size={20}/><strong>Compra con claridad</strong><p>Compará proveedores, costos y stock desde un solo lugar.</p></div>
+      </aside>
+      <main className="main-content">{content}</main>
     </div>
-  </main>;
+  </div>;
 }
 createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);
