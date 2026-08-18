@@ -28,6 +28,21 @@ model Supplier {
   ciudad        String?
   provincia     String?
   pais          String?
+  numero        String?
+  piso          String?
+  codigoPostal  String?
+  condicionIva  String?
+  sitioWeb      String?
+  horarioAtencion String?
+  condicionPago String?
+  moneda        String?         @default("ARS")
+  listaPrecios  String?
+  descuentoVolumen String?
+  costoEnvio    String?
+  calificacion  Int?
+  notasInternas String?
+  categoriaProductos String?
+  archivos      String?
   ofertas       SupplierItem[]
   ordenesCompra PurchaseOrder[]
   createdAt     DateTime        @default(now())

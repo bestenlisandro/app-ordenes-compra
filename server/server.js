@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT || 4000);
 const TAX_RATE = Number(process.env.TAX_RATE || 0.21);
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
 
 const decimal = (value) => Number(value);
 const includesOrder = {
@@ -29,6 +29,14 @@ function optionalString(value) {
 
 function supplierData(body) {
   const tiempoEntrega = body.tiempoEntrega === '' || body.tiempoEntrega == null ? null : Number(body.tiempoEntrega);
+  const calificacion = body.calificacion === '' || body.calificacion == null ? null : Number(body.calificacion);
+  if (calificacion != null && (!Number.isInteger(calificacion) || calificacion < 1 || calificacion > 5)) throw new Error('La calificación debe estar entre 1 y 5.');
+  const archivos = Array.isArray(body.archivos) ? body.archivos : [];
+  if (archivos.length > 5) throw new Error('Puede adjuntar hasta 5 archivos.');
+  archivos.forEach((archivo) => {
+    if (!archivo || typeof archivo.nombre !== 'string' || typeof archivo.tipo !== 'string' || typeof archivo.datos !== 'string' || !archivo.datos.startsWith('data:')) throw new Error('Uno de los archivos adjuntos no es válido.');
+    if (archivo.datos.length > 4_000_000) throw new Error(`El archivo ${archivo.nombre} supera el límite de 3 MB.`);
+  });
   if (tiempoEntrega != null && (!Number.isInteger(tiempoEntrega) || tiempoEntrega < 0)) throw new Error('El tiempo de entrega debe ser una cantidad de días válida.');
   return {
     nombre: requiredString(body.nombre, 'nombre'),
@@ -42,6 +50,21 @@ function supplierData(body) {
     ciudad: optionalString(body.ciudad),
     provincia: optionalString(body.provincia),
     pais: optionalString(body.pais),
+    numero: optionalString(body.numero),
+    piso: optionalString(body.piso),
+    codigoPostal: optionalString(body.codigoPostal),
+    condicionIva: optionalString(body.condicionIva),
+    sitioWeb: optionalString(body.sitioWeb),
+    horarioAtencion: optionalString(body.horarioAtencion),
+    condicionPago: optionalString(body.condicionPago),
+    moneda: optionalString(body.moneda) || 'ARS',
+    listaPrecios: optionalString(body.listaPrecios),
+    descuentoVolumen: optionalString(body.descuentoVolumen),
+    costoEnvio: optionalString(body.costoEnvio),
+    calificacion,
+    notasInternas: optionalString(body.notasInternas),
+    categoriaProductos: optionalString(body.categoriaProductos),
+    archivos: archivos.length ? JSON.stringify(archivos) : null,
   };
 }
 
@@ -104,7 +127,13 @@ function handleError(res, error) {
 }
 
 // CRUD de proveedores
-app.get('/api/suppliers', async (_req, res) => res.json(await prisma.supplier.findMany({ orderBy: { nombre: 'asc' } })));
+app.get('/api/suppliers', async (_req, res) => {
+  const suppliers = await prisma.supplier.findMany({ orderBy: { nombre: 'asc' } });
+  res.json(suppliers.map((supplier) => {
+    try { return { ...supplier, archivos: supplier.archivos ? JSON.parse(supplier.archivos) : [] }; }
+    catch { return { ...supplier, archivos: [] }; }
+  }));
+});
 app.post('/api/suppliers', async (req, res) => {
   try { res.status(201).json(await prisma.supplier.create({ data: supplierData(req.body) })); } catch (e) { handleError(res, e); }
 });
