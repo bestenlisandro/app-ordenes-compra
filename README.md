@@ -1,5 +1,14 @@
 # App de Órdenes de Compra
 
+## Acceso y seguridad
+
+La aplicación exige autenticación y aplica permisos RBAC en la API según rol, centro de costos y límite de aprobación. El usuario inicial se crea con `npm run db:seed`:
+
+- Usuario: `admin`
+- Contraseña inicial: valor de `ADMIN_PASSWORD` o, sólo para desarrollo, `Compras2026!`
+
+Definí `AUTH_SECRET` y `ADMIN_PASSWORD` con valores seguros en el entorno de producción antes de desplegar. El administrador puede crear el resto de las cuentas desde **Accesos**. Los aprobadores disponen del módulo **Delegar** para transferir temporalmente su autoridad.
+
 Aplicación full stack para gestionar órdenes de compra, proveedores y productos. Usa React/Vite, Tailwind, Express, Prisma y SQLite para iniciarse sin servicios externos.
 
 ## Requisitos

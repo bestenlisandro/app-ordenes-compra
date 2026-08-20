@@ -14,6 +14,7 @@
     "db:push": "prisma db push",
     "db:push:render": "prisma db push --schema prisma/schema.postgres.prisma",
     "db:seed": "node prisma/seed.js",
+    "test": "node --test",
     "setup": "npm run db:generate && npm run db:push && npm run db:seed"
   },
   "dependencies": {

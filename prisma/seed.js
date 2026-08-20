@@ -1,8 +1,10 @@
 const { PrismaClient } = require('@prisma/client');
+const { hashPassword } = require('../server/auth');
 const prisma = new PrismaClient();
 
 async function main() {
-  await prisma.supplier.upsert({ where: { taxId: '30-12345678-9' }, update: {}, create: { nombre: 'Distribuidora Central S.A.', taxId: '30-12345678-9', email: 'ventas@central.test', telefono: '+54 11 5555-0100', direccion: 'Av. Siempre Viva 123' } });
+  await prisma.user.upsert({ where: { username: 'admin' }, update: {}, create: { username: 'admin', nombre: 'Administrador del Sistema', email: 'admin@besten.local', role: 'SYSTEM_ADMIN', passwordHash: hashPassword(process.env.ADMIN_PASSWORD || 'Compras2026!') } });
+  await prisma.supplier.upsert({ where: { taxId: '30-12345678-9' }, update: {}, create: { nombre: 'Distribuidora Central', razonSocial: 'Distribuidora Central S.A.', taxId: '30-12345678-9', contacto: 'María González', email: 'ventas@central.test', telefono: '+54 11 5555-0100', tiempoEntrega: 5, direccion: 'Av. Siempre Viva 123', ciudad: 'Buenos Aires', provincia: 'Buenos Aires', pais: 'Argentina' } });
   for (const item of [
     { codigo: 'INS-001', descripcion: 'Resma papel A4 80g', precioUnitario: 8500, stockActual: 24, stockMinimo: 10 },
     { codigo: 'INS-002', descripcion: 'Cartucho de tinta negro', precioUnitario: 22500, stockActual: 4, stockMinimo: 5 },

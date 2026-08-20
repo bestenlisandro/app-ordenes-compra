@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { PrismaClient, OrderStatus } = require('@prisma/client');
+const { ROLE_PERMISSIONS, hashPassword, verifyPassword, signToken, readToken, publicUser } = require('./auth');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -11,6 +12,38 @@ const TAX_RATE = Number(process.env.TAX_RATE || 0.21);
 
 app.use(cors());
 app.use(express.json({ limit: '12mb' }));
+
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+const roles = Object.keys(ROLE_PERMISSIONS);
+const audit = (req, action, entity, entityId, details) => prisma.auditLog.create({ data: { userId: req.user?.id || null, action, entity, entityId: entityId == null ? null : String(entityId), details: details ? JSON.stringify(details) : null, ipAddress: req.ip } }).catch(console.error);
+
+app.post('/api/auth/login', async (req, res) => {
+  const username = String(req.body.username || '').trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { username } });
+  if (!user || !user.active || !verifyPassword(req.body.password, user.passwordHash)) { await prisma.auditLog.create({ data: { action: 'LOGIN_FAILED', entity: 'AUTH', details: JSON.stringify({ username }), ipAddress: req.ip } }); return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' }); }
+  await prisma.auditLog.create({ data: { userId: user.id, action: 'LOGIN', entity: 'AUTH', ipAddress: req.ip } });
+  res.json({ token: signToken(user), user: publicUser(user) });
+});
+
+app.use('/api', async (req, res, next) => {
+  const data = readToken(req.headers.authorization?.replace(/^Bearer\s+/i, ''));
+  if (!data) return res.status(401).json({ error: 'La sesión no es válida o venció.' });
+  const user = await prisma.user.findUnique({ where: { id: Number(data.sub) } });
+  if (!user?.active) return res.status(401).json({ error: 'Usuario inactivo.' });
+  const now = new Date();
+  const delegated = await prisma.delegation.findMany({ where: { delegateId: user.id, active: true, startsAt: { lte: now }, endsAt: { gte: now } }, include: { delegator: true } });
+  req.user = publicUser(user, delegated.map((d) => d.delegator.role)); next();
+});
+const permit = (...permissions) => (req, res, next) => permissions.some((p) => req.user.permissions.includes(p)) ? next() : res.status(403).json({ error: 'No tiene permisos para realizar esta acción.' });
+
+app.get('/api/auth/me', (req, res) => res.json({ user: req.user }));
+app.get('/api/users', permit('users:manage','delegations:create'), async (_req, res) => res.json((await prisma.user.findMany({ where: { active: true }, orderBy: { nombre: 'asc' } })).map((u) => publicUser(u))));
+app.post('/api/users', permit('users:manage'), async (req, res) => { try { if (!roles.includes(req.body.role)) throw new Error('Rol inválido.'); const user = await prisma.user.create({ data: { username: requiredString(req.body.username, 'usuario').toLowerCase(), passwordHash: hashPassword(req.body.password), nombre: requiredString(req.body.nombre, 'nombre'), email: optionalString(req.body.email), role: req.body.role, costCenter: optionalString(req.body.costCenter), approvalLimit: req.body.approvalLimit === '' || req.body.approvalLimit == null ? null : Number(req.body.approvalLimit), supplierId: req.body.supplierId ? Number(req.body.supplierId) : null } }); await audit(req, 'CREATE', 'USER', user.id, { role: user.role }); res.status(201).json(publicUser(user)); } catch(e) { handleError(res,e); } });
+app.patch('/api/users/:id', permit('users:manage'), async (req,res)=>{ try { const data = {}; for (const key of ['nombre','email','costCenter']) if (key in req.body) data[key]=optionalString(req.body[key]); if ('active' in req.body) data.active=Boolean(req.body.active); if (req.body.role) { if(!roles.includes(req.body.role)) throw new Error('Rol inválido.'); data.role=req.body.role; } if ('approvalLimit' in req.body) data.approvalLimit=req.body.approvalLimit===''?null:Number(req.body.approvalLimit); if(req.body.password) data.passwordHash=hashPassword(req.body.password); const user=await prisma.user.update({where:{id:Number(req.params.id)},data}); await audit(req,'UPDATE','USER',user.id,{fields:Object.keys(data)}); res.json(publicUser(user)); }catch(e){handleError(res,e)} });
+app.get('/api/delegations', permit('delegations:create','delegations:manage'), async (req,res)=>res.json(await prisma.delegation.findMany({where:req.user.role==='SYSTEM_ADMIN'?{}:{OR:[{delegatorId:req.user.id},{delegateId:req.user.id}]},include:{delegator:{select:{id:true,nombre:true,role:true}},delegate:{select:{id:true,nombre:true,role:true}}},orderBy:{createdAt:'desc'}})));
+app.post('/api/delegations', permit('delegations:create','delegations:manage'), async (req,res)=>{try{const delegatorId=req.user.role==='SYSTEM_ADMIN'&&req.body.delegatorId?Number(req.body.delegatorId):req.user.id;const delegateId=Number(req.body.delegateId),startsAt=new Date(req.body.startsAt),endsAt=new Date(req.body.endsAt);if(delegateId===delegatorId||Number.isNaN(startsAt.getTime())||!(endsAt>startsAt))throw new Error('Delegación inválida.');const delegation=await prisma.delegation.create({data:{delegatorId,delegateId,startsAt,endsAt}});await audit(req,'CREATE','DELEGATION',delegation.id);res.status(201).json(delegation)}catch(e){handleError(res,e)}});
+app.get('/api/audit', permit('audit:read'), async (_req,res)=>res.json(await prisma.auditLog.findMany({include:{user:{select:{username:true,nombre:true}}},orderBy:{createdAt:'desc'},take:250})));
 
 const decimal = (value) => Number(value);
 const includesOrder = {
@@ -127,34 +160,34 @@ function handleError(res, error) {
 }
 
 // CRUD de proveedores
-app.get('/api/suppliers', async (_req, res) => {
+app.get('/api/suppliers', permit('catalog:read','orders:read'), async (_req, res) => {
   const suppliers = await prisma.supplier.findMany({ orderBy: { nombre: 'asc' } });
   res.json(suppliers.map((supplier) => {
     try { return { ...supplier, archivos: supplier.archivos ? JSON.parse(supplier.archivos) : [] }; }
     catch { return { ...supplier, archivos: [] }; }
   }));
 });
-app.post('/api/suppliers', async (req, res) => {
+app.post('/api/suppliers', permit('suppliers:manage'), async (req, res) => {
   try { res.status(201).json(await prisma.supplier.create({ data: supplierData(req.body) })); } catch (e) { handleError(res, e); }
 });
-app.put('/api/suppliers/:id', async (req, res) => {
+app.put('/api/suppliers/:id', permit('suppliers:manage'), async (req, res) => {
   try { res.json(await prisma.supplier.update({ where: { id: Number(req.params.id) }, data: supplierData(req.body) })); } catch (e) { handleError(res, e); }
 });
-app.delete('/api/suppliers/:id', async (req, res) => { try { await prisma.supplier.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
+app.delete('/api/suppliers/:id', permit('suppliers:manage'), async (req, res) => { try { await prisma.supplier.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
 
 // CRUD de productos
-app.get('/api/items', async (_req, res) => res.json(await prisma.item.findMany({ include: { ofertas: { include: { proveedor: true } } }, orderBy: { codigo: 'asc' } })));
-app.post('/api/items', async (req, res) => {
+app.get('/api/items', permit('catalog:read'), async (_req, res) => res.json(await prisma.item.findMany({ include: { ofertas: { include: { proveedor: true } } }, orderBy: { codigo: 'asc' } })));
+app.post('/api/items', permit('items:manage'), async (req, res) => {
   try { const data = materialData(req.body); res.status(201).json(await prisma.item.create({ data: { ...data.item, ofertas: { create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
 });
-app.put('/api/items/:id', async (req, res) => {
+app.put('/api/items/:id', permit('items:manage'), async (req, res) => {
   try { const data = materialData(req.body); res.json(await prisma.item.update({ where: { id: Number(req.params.id) }, data: { ...data.item, ofertas: { deleteMany: {}, create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
 });
-app.delete('/api/items/:id', async (req, res) => { try { await prisma.item.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
+app.delete('/api/items/:id', permit('items:manage'), async (req, res) => { try { await prisma.item.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
 
 // Stock: ajustes manuales y consulta de existencias.
-app.get('/api/stock', async (_req, res) => res.json(await prisma.item.findMany({ orderBy: { codigo: 'asc' } })));
-app.post('/api/stock/movements', async (req, res) => {
+app.get('/api/stock', permit('stock:manage'), async (_req, res) => res.json(await prisma.item.findMany({ orderBy: { codigo: 'asc' } })));
+app.post('/api/stock/movements', permit('stock:manage'), async (req, res) => {
   try {
     const productoId = Number(req.body.productoId); const cantidad = Number(req.body.cantidad);
     if (!Number.isInteger(productoId) || !(cantidad > 0) || !['ENTRADA', 'SALIDA', 'AJUSTE'].includes(req.body.tipo)) throw new Error('Datos de movimiento inválidos.');
@@ -171,7 +204,7 @@ app.post('/api/stock/movements', async (req, res) => {
   } catch (e) { handleError(res, e); }
 });
 
-app.post('/api/orders', async (req, res) => {
+app.post('/api/orders', permit('orders:create'), async (req, res) => {
   try {
     const {
       proveedorId, fechaEntregaEsperada, lugarEntrega, observaciones, items,
@@ -211,7 +244,7 @@ app.post('/api/orders', async (req, res) => {
     if (fechaEntrega && Number.isNaN(fechaEntrega.getTime())) throw new Error('La fecha de entrega no es válida.');
     const provisional = `PENDIENTE-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const baseData = {
-      numeroOrden: provisional, proveedorId, fechaEntregaEsperada: fechaEntrega,
+      numeroOrden: provisional, proveedorId, requestedById: req.user.id, costCenter: optionalString(req.body.costCenter) || req.user.costCenter, fechaEntregaEsperada: fechaEntrega,
       lugarEntrega: optionalString(lugarEntrega), observaciones: optionalString(observaciones),
       proveedorRazonSocial: optionalString(proveedorRazonSocial) || proveedor.razonSocial || proveedor.nombre,
       proveedorTaxId: optionalString(proveedorTaxId) || proveedor.taxId,
@@ -229,14 +262,17 @@ app.post('/api/orders', async (req, res) => {
       const numeroOrden = `OC-${created.fechaEmision.getFullYear()}-${String(created.id).padStart(6, '0')}`;
       return tx.purchaseOrder.update({ where: { id: created.id }, data: { numeroOrden }, include: includesOrder });
     });
+    await audit(req, 'CREATE', 'PURCHASE_ORDER', order.id, { total: Number(order.total), costCenter: order.costCenter });
     res.status(201).json(order);
   } catch (e) { handleError(res, e); }
 });
 
-app.get('/api/orders', async (req, res) => {
+app.get('/api/orders', permit('orders:read'), async (req, res) => {
   try {
     const { estado, proveedorId, desde, hasta, q } = req.query;
     const where = {
+      ...(req.user.role === 'VENDOR' ? { proveedorId: req.user.supplierId || -1 } : {}),
+      ...(req.user.role === 'REQUESTER' ? { requestedById: req.user.id } : {}),
       ...(estado && Object.values(OrderStatus).includes(estado) ? { estado } : {}),
       ...(proveedorId ? { proveedorId: Number(proveedorId) } : {}),
       ...(desde || hasta ? { fechaEmision: { ...(desde ? { gte: new Date(desde) } : {}), ...(hasta ? { lte: new Date(`${hasta}T23:59:59.999Z`) } : {}) } } : {}),
@@ -245,20 +281,25 @@ app.get('/api/orders', async (req, res) => {
     res.json(await prisma.purchaseOrder.findMany({ where, include: { proveedor: true, _count: { select: { items: true } } }, orderBy: { createdAt: 'desc' } }));
   } catch (e) { handleError(res, e); }
 });
-app.get('/api/orders/:id', async (req, res) => { const order = await prisma.purchaseOrder.findUnique({ where: { id: Number(req.params.id) }, include: includesOrder }); return order ? res.json(order) : res.status(404).json({ error: 'Orden no encontrada.' }); });
-app.patch('/api/orders/:id/status', async (req, res) => {
+app.get('/api/orders/:id', permit('orders:read'), async (req, res) => { const order = await prisma.purchaseOrder.findUnique({ where: { id: Number(req.params.id) }, include: includesOrder }); if (order && req.user.role === 'VENDOR' && order.proveedorId !== req.user.supplierId) return res.status(403).json({ error: 'No tiene acceso a esta orden.' }); return order ? res.json(order) : res.status(404).json({ error: 'Orden no encontrada.' }); });
+app.patch('/api/orders/:id/status', permit('orders:approve','orders:buy','orders:receive','orders:finance'), async (req, res) => {
   try {
     if (!Object.values(OrderStatus).includes(req.body.estado)) throw new Error('Estado inválido.');
     const order = await prisma.purchaseOrder.findUnique({ where: { id: Number(req.params.id) }, include: { items: true } });
     if (!order) return res.status(404).json({ error: 'Orden no encontrada.' });
+    const allowed = { APPROVER: ['APROBADA','CANCELADA','BORRADOR'], BUYER: ['ENVIADA','CANCELADA'], RECEIVER: ['RECIBIDA'], FINANCE: [] };
+    const actingRole = [req.user.role, ...(req.user.delegatedRoles || [])].find((role) => allowed[role]?.includes(req.body.estado));
+    if (!actingRole) return res.status(403).json({ error: 'Su rol no permite esa transición de estado.' });
+    if (actingRole === 'APPROVER' && req.body.estado === 'APROBADA' && req.user.approvalLimit != null && Number(order.total) > req.user.approvalLimit) return res.status(403).json({ error: `La orden supera su límite de aprobación (${req.user.approvalLimit}).` });
+    if (actingRole === 'APPROVER' && req.user.costCenter && order.costCenter && req.user.costCenter !== order.costCenter) return res.status(403).json({ error: 'La orden pertenece a otro centro de costos.' });
     const actions = [prisma.purchaseOrder.update({ where: { id: order.id }, data: { estado: req.body.estado } })];
     // Una orden recibida ingresa sus unidades al stock solo la primera vez.
     if (req.body.estado === 'RECIBIDA' && order.estado !== 'RECIBIDA') order.items.forEach((line) => { actions.push(prisma.item.update({ where: { id: line.productoId }, data: { stockActual: { increment: line.cantidad } } })); actions.push(prisma.stockMovement.create({ data: { productoId: line.productoId, tipo: 'ENTRADA_OC', cantidad: line.cantidad, motivo: `Recepción ${order.numeroOrden}` } })); });
-    const result = await prisma.$transaction(actions); res.json(result[0]);
+    const result = await prisma.$transaction(actions); await audit(req, 'STATUS_CHANGE', 'PURCHASE_ORDER', order.id, { from: order.estado, to: req.body.estado, actingRole }); res.json(result[0]);
   } catch (e) { handleError(res, e); }
 });
 
-app.get('/api/reports/purchases', async (_req, res) => {
+app.get('/api/reports/purchases', permit('reports:read'), async (_req, res) => {
   const orders = await prisma.purchaseOrder.findMany({ include: { proveedor: true }, where: { estado: { not: 'CANCELADA' } } });
   const bySupplier = Object.values(orders.reduce((acc, order) => { const key = order.proveedor.nombre; acc[key] ||= { nombre: key, total: 0 }; acc[key].total += decimal(order.total); return acc; }, {}));
   const byStatus = Object.values(orders.reduce((acc, order) => { acc[order.estado] ||= { estado: order.estado, cantidad: 0, total: 0 }; acc[order.estado].cantidad += 1; acc[order.estado].total += decimal(order.total); return acc; }, {}));

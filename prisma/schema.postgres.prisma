@@ -15,6 +15,58 @@ enum OrderStatus {
   CANCELADA
 }
 
+enum UserRole {
+  SYSTEM_ADMIN
+  REQUESTER
+  APPROVER
+  BUYER
+  RECEIVER
+  FINANCE
+  VENDOR
+}
+
+model User {
+  id              Int          @id @default(autoincrement())
+  username        String       @unique
+  passwordHash    String
+  nombre          String
+  email           String?
+  role            UserRole
+  costCenter      String?
+  approvalLimit   Decimal?
+  supplierId      Int?
+  active          Boolean      @default(true)
+  delegationsFrom Delegation[] @relation("Delegator")
+  delegationsTo   Delegation[] @relation("Delegate")
+  auditLogs       AuditLog[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Delegation {
+  id          Int      @id @default(autoincrement())
+  delegatorId Int
+  delegateId  Int
+  delegator   User     @relation("Delegator", fields: [delegatorId], references: [id], onDelete: Cascade)
+  delegate    User     @relation("Delegate", fields: [delegateId], references: [id], onDelete: Cascade)
+  startsAt    DateTime
+  endsAt      DateTime
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  entity     String
+  entityId   String?
+  details    String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+}
+
 model Supplier {
   id            Int             @id @default(autoincrement())
   nombre        String
@@ -113,6 +165,8 @@ model PurchaseOrder {
   id                   Int         @id @default(autoincrement())
   numeroOrden          String      @unique
   proveedorId          Int
+  requestedById        Int?
+  costCenter           String?
   proveedor            Supplier    @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
   fechaEmision         DateTime    @default(now())
   fechaEntregaEsperada DateTime?

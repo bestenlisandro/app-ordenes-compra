@@ -15,68 +15,120 @@ enum OrderStatus {
   CANCELADA
 }
 
+enum UserRole {
+  SYSTEM_ADMIN
+  REQUESTER
+  APPROVER
+  BUYER
+  RECEIVER
+  FINANCE
+  VENDOR
+}
+
+model User {
+  id              Int          @id @default(autoincrement())
+  username        String       @unique
+  passwordHash    String
+  nombre          String
+  email           String?
+  role            UserRole
+  costCenter      String?
+  approvalLimit   Decimal?
+  supplierId      Int?
+  active          Boolean      @default(true)
+  delegationsFrom Delegation[] @relation("Delegator")
+  delegationsTo   Delegation[] @relation("Delegate")
+  auditLogs       AuditLog[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model Delegation {
+  id          Int      @id @default(autoincrement())
+  delegatorId Int
+  delegateId  Int
+  delegator   User     @relation("Delegator", fields: [delegatorId], references: [id], onDelete: Cascade)
+  delegate    User     @relation("Delegate", fields: [delegateId], references: [id], onDelete: Cascade)
+  startsAt    DateTime
+  endsAt      DateTime
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
 model Supplier {
-  id            Int             @id @default(autoincrement())
-  nombre        String
-  taxId         String          @unique
-  email         String?
-  telefono      String?
-  contacto      String?
-  razonSocial   String?
-  tiempoEntrega Int?
-  direccion     String?
-  ciudad        String?
-  provincia     String?
-  pais          String?
-  numero        String?
-  piso          String?
-  codigoPostal  String?
-  condicionIva  String?
-  sitioWeb      String?
-  horarioAtencion String?
-  condicionPago String?
-  moneda        String?         @default("ARS")
-  listaPrecios  String?
-  descuentoVolumen String?
-  costoEnvio    String?
-  calificacion  Int?
-  notasInternas String?
+  id                 Int             @id @default(autoincrement())
+  nombre             String
+  taxId              String          @unique
+  email              String?
+  telefono           String?
+  contacto           String?
+  razonSocial        String?
+  tiempoEntrega      Int?
+  direccion          String?
+  ciudad             String?
+  provincia          String?
+  pais               String?
+  numero             String?
+  piso               String?
+  codigoPostal       String?
+  condicionIva       String?
+  sitioWeb           String?
+  horarioAtencion    String?
+  condicionPago      String?
+  moneda             String?         @default("ARS")
+  listaPrecios       String?
+  descuentoVolumen   String?
+  costoEnvio         String?
+  calificacion       Int?
+  notasInternas      String?
   categoriaProductos String?
-  archivos      String?
-  ofertas       SupplierItem[]
-  ordenesCompra PurchaseOrder[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  archivos           String?
+  ofertas            SupplierItem[]
+  ordenesCompra      PurchaseOrder[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 }
 
 model Item {
-  id               Int             @id @default(autoincrement())
-  codigo           String          @unique
-  descripcion      String
-  marca            String?
-  categoria        String?
-  familia          String?
-  subfamilia       String?
-  estado           String          @default("ACTIVO")
-  unidadMedida     String?
-  unidadCompra     String?
-  factorConversion Decimal         @default(1)
-  codigoQr         String?
-  puntoPedido      Decimal         @default(0)
-  precioUnitario   Decimal         @default(0)
-  stockActual      Decimal         @default(0)
-  stockMinimo      Decimal         @default(0)
-  stockMaximo      Decimal?
-  ubicacion        String?
-  costoEstandar    Decimal         @default(0)
-  iva              Decimal         @default(21)
+  id                Int             @id @default(autoincrement())
+  codigo            String          @unique
+  descripcion       String
+  marca             String?
+  categoria         String?
+  familia           String?
+  subfamilia        String?
+  estado            String          @default("ACTIVO")
+  unidadMedida      String?
+  unidadCompra      String?
+  factorConversion  Decimal         @default(1)
+  codigoQr          String?
+  puntoPedido       Decimal         @default(0)
+  precioUnitario    Decimal         @default(0)
+  stockActual       Decimal         @default(0)
+  stockMinimo       Decimal         @default(0)
+  stockMaximo       Decimal?
+  ubicacion         String?
+  costoEstandar     Decimal         @default(0)
+  iva               Decimal         @default(21)
   atributosTecnicos String?
-  documentacionUrl String?
-  detallesOrden    OrderItem[]
-  movimientosStock StockMovement[]
-  ofertas          SupplierItem[]
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  documentacionUrl  String?
+  detallesOrden     OrderItem[]
+  movimientosStock  StockMovement[]
+  ofertas           SupplierItem[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 }
 
 model SupplierItem {
@@ -113,6 +165,8 @@ model PurchaseOrder {
   id                     Int         @id @default(autoincrement())
   numeroOrden            String      @unique
   proveedorId            Int
+  requestedById          Int?
+  costCenter             String?
   proveedor              Supplier    @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
   fechaEmision           DateTime    @default(now())
   fechaEntregaEsperada   DateTime?
@@ -142,14 +196,14 @@ model PurchaseOrder {
 }
 
 model OrderItem {
-  id             Int           @id @default(autoincrement())
-  ordenId        Int
-  productoId     Int
-  orden          PurchaseOrder @relation(fields: [ordenId], references: [id], onDelete: Cascade)
-  producto       Item          @relation(fields: [productoId], references: [id], onDelete: Restrict)
-  cantidad       Decimal
-  precioUnitario Decimal
-  subtotalLinea  Decimal
+  id              Int           @id @default(autoincrement())
+  ordenId         Int
+  productoId      Int
+  orden           PurchaseOrder @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  producto        Item          @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  cantidad        Decimal
+  precioUnitario  Decimal
+  subtotalLinea   Decimal
   codigoProveedor String?
   nombreProveedor String?
 }

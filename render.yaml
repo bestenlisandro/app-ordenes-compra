@@ -5,11 +5,15 @@ services:
     plan: free
     buildCommand: npm install && npm run db:generate:render && npm run build
     startCommand: npm run start:render
-    healthCheckPath: /api/orders
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
       - key: TAX_RATE
         value: "0.21"
       - key: DATABASE_URL
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: ADMIN_PASSWORD
         sync: false
