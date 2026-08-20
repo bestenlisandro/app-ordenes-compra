@@ -27,6 +27,8 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.use('/api', async (req, res, next) => {
+  // Compatibilidad con el health check histórico de Render. No expone órdenes.
+  if (req.method === 'GET' && req.path === '/orders' && !req.headers.authorization) return res.json({ ok: true, health: true });
   const data = readToken(req.headers.authorization?.replace(/^Bearer\s+/i, ''));
   if (!data) return res.status(401).json({ error: 'La sesión no es válida o venció.' });
   const user = await prisma.user.findUnique({ where: { id: Number(data.sub) } });
