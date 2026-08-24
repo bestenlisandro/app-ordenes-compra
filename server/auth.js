@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const ROLE_PERMISSIONS = {
-  SYSTEM_ADMIN: ['users:manage','audit:read','delegations:manage'], REQUESTER: ['catalog:read','orders:read','orders:create'],
+  SYSTEM_ADMIN: ['users:manage','audit:read','delegations:manage','delegations:create','catalog:read','orders:read','orders:create','orders:approve','orders:buy','orders:receive','orders:finance','orders:vendor','suppliers:manage','items:manage','stock:manage','reports:read'], REQUESTER: ['catalog:read','orders:read','orders:create'],
   APPROVER: ['catalog:read','orders:read','orders:approve','delegations:create'], BUYER: ['catalog:read','orders:read','orders:create','orders:buy','suppliers:manage','items:manage'],
   RECEIVER: ['catalog:read','orders:read','orders:receive','stock:manage'], FINANCE: ['orders:read','orders:finance','reports:read'], VENDOR: ['orders:read','orders:vendor']
 };

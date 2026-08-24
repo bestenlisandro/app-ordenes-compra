@@ -289,7 +289,7 @@ app.patch('/api/orders/:id/status', permit('orders:approve','orders:buy','orders
     if (!Object.values(OrderStatus).includes(req.body.estado)) throw new Error('Estado inválido.');
     const order = await prisma.purchaseOrder.findUnique({ where: { id: Number(req.params.id) }, include: { items: true } });
     if (!order) return res.status(404).json({ error: 'Orden no encontrada.' });
-    const allowed = { APPROVER: ['APROBADA','CANCELADA','BORRADOR'], BUYER: ['ENVIADA','CANCELADA'], RECEIVER: ['RECIBIDA'], FINANCE: [] };
+    const allowed = { SYSTEM_ADMIN: Object.values(OrderStatus), APPROVER: ['APROBADA','CANCELADA','BORRADOR'], BUYER: ['ENVIADA','CANCELADA'], RECEIVER: ['RECIBIDA'], FINANCE: [] };
     const actingRole = [req.user.role, ...(req.user.delegatedRoles || [])].find((role) => allowed[role]?.includes(req.body.estado));
     if (!actingRole) return res.status(403).json({ error: 'Su rol no permite esa transición de estado.' });
     if (actingRole === 'APPROVER' && req.body.estado === 'APROBADA' && req.user.approvalLimit != null && Number(order.total) > req.user.approvalLimit) return res.status(403).json({ error: `La orden supera su límite de aprobación (${req.user.approvalLimit}).` });

@@ -7,6 +7,8 @@ La aplicación exige autenticación y aplica permisos RBAC en la API según rol,
 - Usuario: `admin`
 - Contraseña inicial: valor de `ADMIN_PASSWORD` o, sólo para desarrollo, `Compras2026!`
 
+El rol `SYSTEM_ADMIN` dispone de acceso total para soporte y pruebas, además de la gestión de usuarios. Se recomienda reservar esta cuenta y utilizar roles operativos separados en el trabajo cotidiano.
+
 Definí `AUTH_SECRET` y `ADMIN_PASSWORD` con valores seguros en el entorno de producción antes de desplegar. El administrador puede crear el resto de las cuentas desde **Accesos**. Los aprobadores disponen del módulo **Delegar** para transferir temporalmente su autoridad.
 
 ### Aislamiento de la base de datos
