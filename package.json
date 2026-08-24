@@ -8,7 +8,7 @@
     "dev:client": "vite --host 0.0.0.0",
     "build": "vite build",
     "start": "node server/server.js",
-    "start:render": "npm run db:push:render && npm run db:seed && node server/server.js",
+    "start:render": "node server/server.js",
     "db:generate": "prisma generate",
     "db:generate:render": "prisma generate --schema prisma/schema.postgres.prisma",
     "db:push": "prisma db push",

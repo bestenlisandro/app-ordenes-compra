@@ -9,6 +9,10 @@ La aplicación exige autenticación y aplica permisos RBAC en la API según rol,
 
 Definí `AUTH_SECRET` y `ADMIN_PASSWORD` con valores seguros en el entorno de producción antes de desplegar. El administrador puede crear el resto de las cuentas desde **Accesos**. Los aprobadores disponen del módulo **Delegar** para transferir temporalmente su autoridad.
 
+### Aislamiento de la base de datos
+
+El servicio de producción no ejecuta migraciones ni datos iniciales durante el arranque. Esto evita que una `DATABASE_URL` configurada por error pueda modificar la base de otra aplicación. Antes de ejecutar `db:push:render` o `db:seed`, verificá en Render que `DATABASE_URL` pertenezca exclusivamente a la base de Compras y nunca a la aplicación de Energía.
+
 Aplicación full stack para gestionar órdenes de compra, proveedores y productos. Usa React/Vite, Tailwind, Express, Prisma y SQLite para iniciarse sin servicios externos.
 
 ## Requisitos
