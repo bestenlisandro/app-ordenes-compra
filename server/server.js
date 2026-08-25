@@ -182,6 +182,36 @@ app.get('/api/items', permit('catalog:read'), async (_req, res) => res.json(awai
 app.post('/api/items', permit('items:manage'), async (req, res) => {
   try { const data = materialData(req.body); res.status(201).json(await prisma.item.create({ data: { ...data.item, ofertas: { create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
 });
+app.post('/api/items/import', permit('items:manage'), async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+    const updateExisting = Boolean(req.body.updateExisting);
+    if (!rows.length || rows.length > 1000) throw new Error('La importación debe contener entre 1 y 1000 materiales.');
+    const results = { created: 0, updated: 0, skipped: 0, errors: [] };
+    for (let index = 0; index < rows.length; index += 1) {
+      try {
+        const row = rows[index];
+        const data = materialData({ ...row, ofertas: [] });
+        if (!['ACTIVO', 'INACTIVO', 'DESCONTINUACION'].includes(data.item.estado)) throw new Error('Estado inválido.');
+        const stockActual = row.stockActual === '' || row.stockActual == null ? 0 : Number(row.stockActual);
+        if (!Number.isFinite(stockActual) || stockActual < 0) throw new Error('El stock actual debe ser un número igual o mayor a cero.');
+        const existing = await prisma.item.findUnique({ where: { codigo: data.item.codigo } });
+        if (existing && !updateExisting) { results.skipped += 1; continue; }
+        if (existing) {
+          await prisma.item.update({ where: { id: existing.id }, data: { ...data.item, stockActual } });
+          results.updated += 1;
+        } else {
+          await prisma.item.create({ data: { ...data.item, stockActual } });
+          results.created += 1;
+        }
+      } catch (error) {
+        results.errors.push({ row: Number(rows[index]?.sourceRow || index + 2), codigo: rows[index]?.codigo || '', error: error.message });
+      }
+    }
+    await audit(req, 'BULK_IMPORT', 'ITEM', null, results);
+    res.json(results);
+  } catch (e) { handleError(res, e); }
+});
 app.put('/api/items/:id', permit('items:manage'), async (req, res) => {
   try { const data = materialData(req.body); res.json(await prisma.item.update({ where: { id: Number(req.params.id) }, data: { ...data.item, ofertas: { deleteMany: {}, create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
 });
