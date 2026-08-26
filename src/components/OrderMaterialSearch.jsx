@@ -72,7 +72,8 @@ export default function OrderMaterialSearch({ products, value, onSelect, supplie
         aria-autocomplete="list" aria-expanded={open} aria-controls={open ? `${id}-list` : undefined}
         aria-activedescendant={open && active ? `${id}-option-${active.id}` : undefined}
         aria-describedby={`${id}-help`} aria-invalid={invalid || undefined}
-        value={displayValue} autoComplete="off" placeholder="Código, descripción, marca o proveedor…"
+        value={displayValue} autoComplete="off" disabled={!supplierId}
+        placeholder={supplierId ? 'Código, descripción o marca…' : 'Elegí primero un proveedor'}
         onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onKeyDown={handleKeyDown}
         onChange={(event) => {
           setQuery(event.target.value);
@@ -84,9 +85,11 @@ export default function OrderMaterialSearch({ products, value, onSelect, supplie
       {displayValue && <button type="button" aria-label={`Limpiar material, ítem ${itemNumber}`}
         onMouseDown={(event) => event.preventDefault()} onClick={clear}>Limpiar</button>}
     </div>
-    <p id={`${id}-help`} className="order-material-help">Combiná palabras, igual que en Materiales. Elegí una coincidencia.</p>
+    <p id={`${id}-help`} className="order-material-help">{!supplierId ? 'Elegí el proveedor de la orden para buscar sus materiales.'
+      : !products.length ? 'Este proveedor no tiene materiales asociados. Asociá los materiales al proveedor desde Materiales.'
+        : 'Solo materiales del proveedor elegido. Podés combinar palabras.'}</p>
     {open && <div className="order-material-results">
-      <p role="status">{matches.length} de {products.length} materiales</p>
+      <p role="status">{matches.length} de {products.length} materiales del proveedor</p>
       <div ref={listRef} id={`${id}-list`} role="listbox" aria-label={`Materiales para el ítem ${itemNumber}`} className="order-material-options">
         {matches.map((product, index) => {
           const offer = product.ofertas?.find((item) => item.proveedorId === supplierId);
@@ -96,14 +99,13 @@ export default function OrderMaterialSearch({ products, value, onSelect, supplie
             onMouseDown={(event) => event.preventDefault()} onClick={() => choose(product)}>
             <span><strong>{product.codigo}</strong> — {product.descripcion}
               <small>{[product.marca, product.categoria].filter(Boolean).join(' · ')}</small>
-              {offer ? <small>Proveedor: {offer.codigoProveedor || product.codigo} — {offer.nombreProveedor || product.descripcion}</small>
-                : !!supplierId && <small>Sin equivalencia para este proveedor; se usa el material interno.</small>}
+              {offer && <small>Proveedor: {offer.codigoProveedor || product.codigo} — {offer.nombreProveedor || product.descripcion}</small>}
             </span>
             {product.id === Number(value) && <Check size={16} aria-hidden="true" />}
           </button>;
         })}
       </div>
-      {!matches.length && <p>{products.length ? 'No hay materiales que coincidan. Probá con otras palabras o limpiá la búsqueda.' : 'No hay materiales disponibles.'}</p>}
+      {!matches.length && <p>{products.length ? 'No hay materiales de este proveedor que coincidan. Probá con otras palabras o limpiá la búsqueda.' : 'Este proveedor no tiene materiales asociados.'}</p>}
     </div>}
   </div>;
 }
