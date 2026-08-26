@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Download, FileSpreadsheet, FileText, Plus, Save, Trash2, Upload, XCircle } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, ChevronDown, ChevronUp, Download, FileSpreadsheet, FileText, Plus, Save, Search, Trash2, Upload, XCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { filterMaterials } from '../utils/materialSearch.mjs';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyOffer = () => ({ proveedorId:'', nombreProveedor:'', codigoProveedor:'', marcaProveedor:'', esPreferido:false, precioSinIva:'', precioConIva:'', moneda:'ARS', fechaActualizacionCosto:today(), tiempoEntrega:'', loteMinimo:1 });
@@ -13,6 +14,10 @@ const Input = ({ label, ...props }) => <label className="label">{label}<input {.
 export default function Materials() {
   const [materials,setMaterials] = useState([]); const [suppliers,setSuppliers] = useState([]); const [form,setForm] = useState(empty()); const [editing,setEditing] = useState(null); const [message,setMessage] = useState(''); const [showForm,setShowForm] = useState(false);
   const [showImport,setShowImport] = useState(false); const [importRows,setImportRows] = useState([]); const [importErrors,setImportErrors] = useState([]); const [importing,setImporting] = useState(false); const [updateExisting,setUpdateExisting] = useState(false); const [importFile,setImportFile] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInput = useRef(null);
+  const filteredMaterials = useMemo(() => filterMaterials(materials, searchQuery), [materials, searchQuery]);
+  const clearSearch = () => { setSearchQuery(''); searchInput.current?.focus(); };
   const load = () => Promise.all([fetch('/api/items'),fetch('/api/suppliers')]).then(async ([i,s]) => { setMaterials(await i.json()); setSuppliers(await s.json()); });
   useEffect(() => { load(); }, []);
   const change = (e) => setForm({...form,[e.target.name]:e.target.value});
@@ -43,6 +48,20 @@ export default function Materials() {
       <Section title="E. Ficha técnica y documentación" subtitle="Información técnica y enlaces a documentos."><div className="form-grid two"><label className="label">Atributos técnicos<textarea name="atributosTecnicos" value={form.atributosTecnicos||''} onChange={change} rows="4" className="field mt-1" placeholder="Espesor, densidad, color, acabado, dimensiones…"/></label><label className="label">URL de ficha técnica / documentación<textarea name="documentacionUrl" value={form.documentacionUrl||''} onChange={change} rows="4" className="field mt-1" placeholder="Enlace a PDF, plano, certificado o MSDS"/></label></div></Section>
       <div className="form-actions"><button type="button" className="btn-secondary" onClick={reset}>Cancelar</button><button className="btn-primary"><Save size={17}/> Guardar material</button></div>
     </form>}
-    <section className="materials-list"><div className="list-heading"><div><h2>Materiales registrados</h2><p>{materials.length} fichas en el maestro interno</p></div></div>{materials.length?materials.map(m=><article className="material-card" key={m.id}><div className="material-main"><span className={`status-dot ${m.estado?.toLowerCase()||'activo'}`}>{m.estado||'ACTIVO'}</span><h3>{m.codigo} · {m.descripcion}</h3><p>{[m.categoria,m.familia,m.subfamilia,m.marca].filter(Boolean).join(' › ')||'Sin clasificación'}</p><div className="material-stats"><span>Stock <strong>{Number(m.stockActual)} {m.unidadMedida||'u.'}</strong></span><span>Reorden <strong>{Number(m.puntoPedido||0)}</strong></span><span>Ubicación <strong>{m.ubicacion||'—'}</strong></span></div></div><div className="material-actions"><button onClick={()=>edit(m)}>Editar</button><button className="danger" onClick={()=>remove(m.id)}><Trash2 size={17}/></button></div><div className="equivalence-grid">{m.ofertas.map(o=><div key={o.id}><small>{o.proveedor.nombre}{o.esPreferido?' · Preferido':''}</small><strong>{o.codigoProveedor||m.codigo}</strong><p>{o.nombreProveedor||m.descripcion}</p><span>{o.moneda} {Number(o.precioSinIva).toLocaleString('es-AR')} · {o.tiempoEntrega??'—'} días</span></div>)}</div></article>):<div className="empty-catalog"><FileText/><h2>Todavía no hay materiales</h2><p>Creá la primera ficha para comenzar.</p></div>}</section>
+    <section className="materials-list">
+      <div className="list-heading"><div><h2>Materiales registrados</h2><p role="status" aria-live="polite">{searchQuery.trim() ? `${filteredMaterials.length} de ${materials.length} materiales encontrados` : `${materials.length} fichas en el maestro interno`}</p></div></div>
+      <div className="materials-search-toolbar" role="search" aria-label="Buscar en materiales">
+        <label className="label" htmlFor="materials-search-input">Buscar materiales</label>
+        <div className="materials-search-control">
+          <Search size={19} aria-hidden="true"/>
+          <input id="materials-search-input" ref={searchInput} type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') clearSearch(); }} placeholder="Código, descripción, marca o categoría…" aria-describedby="materials-search-help" aria-controls="materials-results"/>
+          {searchQuery && <button type="button" onClick={clearSearch} aria-label="Limpiar búsqueda de materiales">Limpiar</button>}
+        </div>
+        <p id="materials-search-help">También podés buscar por proveedor, su código o ubicación. Ejemplo: bisagra hafele.</p>
+      </div>
+      <div id="materials-results">
+        {filteredMaterials.length ? filteredMaterials.map(m=><article className="material-card" key={m.id}><div className="material-main"><span className={`status-dot ${m.estado?.toLowerCase()||'activo'}`}>{m.estado||'ACTIVO'}</span><h3>{m.codigo} · {m.descripcion}</h3><p>{[m.categoria,m.familia,m.subfamilia,m.marca].filter(Boolean).join(' › ')||'Sin clasificación'}</p><div className="material-stats"><span>Stock <strong>{Number(m.stockActual)} {m.unidadMedida||'u.'}</strong></span><span>Reorden <strong>{Number(m.puntoPedido||0)}</strong></span><span>Ubicación <strong>{m.ubicacion||'—'}</strong></span></div></div><div className="material-actions"><button onClick={()=>edit(m)}>Editar</button><button className="danger" onClick={()=>remove(m.id)}><Trash2 size={17}/></button></div><div className="equivalence-grid">{m.ofertas.map(o=><div key={o.id}><small>{o.proveedor.nombre}{o.esPreferido?' · Preferido':''}</small><strong>{o.codigoProveedor||m.codigo}</strong><p>{o.nombreProveedor||m.descripcion}</p><span>{o.moneda} {Number(o.precioSinIva).toLocaleString('es-AR')} · {o.tiempoEntrega??'—'} días</span></div>)}</div></article>) : materials.length ? <div className="empty-catalog materials-no-results"><Search aria-hidden="true"/><h2>No encontramos materiales</h2><p>Probá con otro código o con menos palabras.</p><button type="button" className="btn-secondary" onClick={clearSearch}>Limpiar búsqueda</button></div> : <div className="empty-catalog"><FileText/><h2>Todavía no hay materiales</h2><p>Creá la primera ficha para comenzar.</p></div>}
+      </div>
+    </section>
   </div>;
 }
