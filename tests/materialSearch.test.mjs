@@ -45,3 +45,10 @@ test('does not mutate materials or change the identity used by edit/delete', () 
   assert.strictEqual(filterMaterials(materials, 'egger')[0], materials[1]);
   assert.equal(JSON.stringify(materials), before);
 });
+test('returns every matching material, including more than eight and different suppliers', () => {
+  const catalog = Array.from({ length: 25 }, (_, index) => ({
+    id: index + 1, codigo: `TOR-${index}`, descripcion: 'Tornillo galvanizado',
+    ofertas: [{ proveedorId: index % 2 + 1, proveedor: { nombre: 'Distribuidora' } }],
+  }));
+  assert.deepEqual(filterMaterials(catalog, 'GALVANIZADO distribuidora tornillo'), catalog);
+});
