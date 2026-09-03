@@ -10,6 +10,7 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = Number(process.env.PORT || 4000);
 const TAX_RATE = Number(process.env.TAX_RATE || 0.21);
+const FREE_ITEM_CODE = '__ITEM_LIBRE_OC__';
 
 app.use(cors());
 app.use(express.json({ limit: '12mb' }));
@@ -185,7 +186,7 @@ app.put('/api/suppliers/:id', permit('suppliers:manage'), async (req, res) => {
 app.delete('/api/suppliers/:id', permit('suppliers:manage'), async (req, res) => { try { await prisma.supplier.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
 
 // CRUD de productos
-app.get('/api/items', permit('catalog:read'), async (_req, res) => res.json((await prisma.item.findMany({ include: { ofertas: { include: { proveedor: true } } }, orderBy: { codigo: 'asc' } })).map(publicMaterial)));
+app.get('/api/items', permit('catalog:read'), async (_req, res) => res.json((await prisma.item.findMany({ where: { codigo: { not: FREE_ITEM_CODE } }, include: { ofertas: { include: { proveedor: true } } }, orderBy: { codigo: 'asc' } })).map(publicMaterial)));
 app.post('/api/items', permit('items:manage'), async (req, res) => {
   try { const data = materialData(req.body); res.status(201).json(publicMaterial(await prisma.item.create({ data: { ...data.item, ofertas: { create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } }))); } catch (e) { handleError(res, e); }
 });
@@ -258,12 +259,29 @@ app.post('/api/orders', permit('orders:create'), async (req, res) => {
     if (!Array.isArray(items) || items.length === 0) throw new Error('La orden debe tener al menos un ítem.');
     const proveedor = await prisma.supplier.findUnique({ where: { id: proveedorId } });
     if (!proveedor) throw new Error('El proveedor seleccionado no existe.');
-    const productIds = items.map((item) => Number(item.productoId));
+    const catalogItems = items.filter((item) => item.tipo !== 'LIBRE');
+    const freeItems = items.filter((item) => item.tipo === 'LIBRE');
+    const productIds = catalogItems.map((item) => Number(item.productoId));
     const products = await prisma.item.findMany({ where: { id: { in: productIds } }, include: { ofertas: true } });
     if (products.length !== new Set(productIds).size) throw new Error('Uno o más productos no existen.');
+    const freeProduct = freeItems.length ? await prisma.item.upsert({
+      where: { codigo: FREE_ITEM_CODE },
+      update: {},
+      create: { codigo: FREE_ITEM_CODE, descripcion: 'Ítem libre de orden de compra', estado: 'INACTIVO' },
+    }) : null;
     const productById = new Map(products.map((product) => [product.id, product]));
     const lineas = items.map((item) => {
       const cantidad = Number(item.cantidad);
+      const precioIngresado = Number(item.precioUnitario);
+      if (item.tipo === 'LIBRE') {
+        const descripcion = requiredString(item.descripcionLibre, 'descripción del ítem libre');
+        if (descripcion.length > 500) throw new Error('La descripción del ítem libre admite hasta 500 caracteres.');
+        if (!(cantidad > 0)) throw new Error('La cantidad del ítem libre debe ser mayor a cero.');
+        if (!(precioIngresado > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
+        const codigo = optionalString(item.codigoLibre);
+        if (codigo && codigo.length > 100) throw new Error('El código del ítem libre admite hasta 100 caracteres.');
+        return { productoId: freeProduct.id, cantidad, precioUnitario: precioIngresado, subtotalLinea: cantidad * precioIngresado, codigoProveedor: codigo || '—', nombreProveedor: descripcion };
+      }
       const producto = productById.get(Number(item.productoId));
       if (!producto || !(cantidad > 0)) throw new Error('Cada ítem debe tener producto y cantidad mayor a cero.');
       const precioUnitario = item.precioUnitario == null ? decimal(producto.precioUnitario) : Number(item.precioUnitario);
@@ -335,7 +353,10 @@ app.patch('/api/orders/:id/status', permit('orders:approve','orders:buy','orders
     if (actingRole === 'APPROVER' && req.user.costCenter && order.costCenter && req.user.costCenter !== order.costCenter) return res.status(403).json({ error: 'La orden pertenece a otro centro de costos.' });
     const actions = [prisma.purchaseOrder.update({ where: { id: order.id }, data: { estado: req.body.estado } })];
     // Una orden recibida ingresa sus unidades al stock solo la primera vez.
-    if (req.body.estado === 'RECIBIDA' && order.estado !== 'RECIBIDA') order.items.forEach((line) => { actions.push(prisma.item.update({ where: { id: line.productoId }, data: { stockActual: { increment: line.cantidad } } })); actions.push(prisma.stockMovement.create({ data: { productoId: line.productoId, tipo: 'ENTRADA_OC', cantidad: line.cantidad, motivo: `Recepción ${order.numeroOrden}` } })); });
+    if (req.body.estado === 'RECIBIDA' && order.estado !== 'RECIBIDA') {
+      const freeProduct = await prisma.item.findUnique({ where: { codigo: FREE_ITEM_CODE }, select: { id: true } });
+      order.items.filter((line) => line.productoId !== freeProduct?.id).forEach((line) => { actions.push(prisma.item.update({ where: { id: line.productoId }, data: { stockActual: { increment: line.cantidad } } })); actions.push(prisma.stockMovement.create({ data: { productoId: line.productoId, tipo: 'ENTRADA_OC', cantidad: line.cantidad, motivo: `Recepción ${order.numeroOrden}` } })); });
+    }
     const result = await prisma.$transaction(actions); await audit(req, 'STATUS_CHANGE', 'PURCHASE_ORDER', order.id, { from: order.estado, to: req.body.estado, actingRole }); res.json(result[0]);
   } catch (e) { handleError(res, e); }
 });
