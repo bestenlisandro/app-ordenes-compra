@@ -4,7 +4,17 @@ import { ArrowRight, Boxes, Building2, CheckCircle2, ClipboardList, PackageSearc
 export default function HomeView({ onNavigate }) {
   const [data, setData] = useState({ items: [], suppliers: [], orders: [] });
   const [loading, setLoading] = useState(true);
-  useEffect(() => { Promise.all([fetch('/api/items'), fetch('/api/suppliers'), fetch('/api/orders')]).then(async ([i,s,o]) => setData({ items: await i.json(), suppliers: await s.json(), orders: await o.json() })).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    const list = async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) return [];
+      const value = await response.json();
+      return Array.isArray(value) ? value : [];
+    };
+    Promise.all([list('/api/items'), list('/api/suppliers'), list('/api/orders')])
+      .then(([items, suppliers, orders]) => setData({ items, suppliers, orders }))
+      .finally(() => setLoading(false));
+  }, []);
   const lowStock = data.items.filter((item) => Number(item.stockActual) <= Number(item.stockMinimo || item.puntoPedido));
   const active = data.orders.filter((order) => !['RECIBIDA', 'CANCELADA'].includes(order.estado));
   return <div className="page-stack">

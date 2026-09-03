@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { materialPhoto } = require('./materialPhoto');
+const { ensureMaterialPhotoColumn } = require('./ensureMaterialPhotoColumn');
 const { PrismaClient, OrderStatus } = require('@prisma/client');
 const { ROLE_PERMISSIONS, hashPassword, verifyPassword, signToken, readToken, publicUser } = require('./auth');
 
@@ -351,4 +352,14 @@ if (process.env.NODE_ENV === 'production') {
     next();
   });
 }
-app.listen(PORT, () => console.log(`API disponible en http://localhost:${PORT}`));
+async function start() {
+  // Render may retain an older dashboard start command instead of render.yaml.
+  // Verify the additive photo column here as well before accepting requests.
+  if (process.env.NODE_ENV === 'production') await ensureMaterialPhotoColumn(prisma);
+  app.listen(PORT, () => console.log(`API disponible en http://localhost:${PORT}`));
+}
+
+start().catch((error) => {
+  console.error('No se pudo iniciar la API:', error);
+  process.exit(1);
+});
