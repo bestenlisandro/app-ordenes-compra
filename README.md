@@ -15,6 +15,12 @@ Definí `AUTH_SECRET` y `ADMIN_PASSWORD` con valores seguros en el entorno de pr
 
 El servicio de producción no ejecuta migraciones ni datos iniciales durante el arranque. Esto evita que una `DATABASE_URL` configurada por error pueda modificar la base de otra aplicación. Antes de ejecutar `db:push:render` o `db:seed`, verificá en Render que `DATABASE_URL` pertenezca exclusivamente a la base de Compras y nunca a la aplicación de Energía.
 
+### Fotos de materiales
+
+La ficha permite cargar, reemplazar y quitar una foto JPG, PNG o WebP de hasta 10 MB. Se optimiza a un máximo de 800 píxeles por lado y se guarda junto al material en la base de datos. Las importaciones de Excel conservan la foto existente.
+
+En SQLite local, `npm run db:push` agrega la columna opcional `Item.foto`. En Render, el inicio verifica exclusivamente esa columna después de exigir `DATABASE_PURPOSE=compras`, y luego levanta la API.
+
 Aplicación full stack para gestionar órdenes de compra, proveedores y productos. Usa React/Vite, Tailwind, Express, Prisma y SQLite para iniciarse sin servicios externos.
 
 ## Requisitos

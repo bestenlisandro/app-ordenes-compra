@@ -124,6 +124,7 @@ model Item {
   iva             Decimal         @default(21)
   atributosTecnicos String?
   documentacionUrl String?
+  foto            String?
   detallesOrden   OrderItem[]
   movimientosStock StockMovement[]
   ofertas         SupplierItem[]

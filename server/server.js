@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { materialPhoto } = require('./materialPhoto');
 const { PrismaClient, OrderStatus } = require('@prisma/client');
 const { ROLE_PERMISSIONS, hashPassword, verifyPassword, signToken, readToken, publicUser } = require('./auth');
 
@@ -148,6 +149,7 @@ function materialData(body) {
       iva: body.iva === '' || body.iva == null ? 21 : Number(body.iva),
       atributosTecnicos: optionalString(body.atributosTecnicos),
       documentacionUrl: optionalString(body.documentacionUrl),
+      foto: materialPhoto(body.foto),
       precioUnitario: ofertas[0]?.precioSinIva || 0,
     },
     ofertas,
