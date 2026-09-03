@@ -17,9 +17,7 @@ El servicio de producción no ejecuta migraciones ni datos iniciales durante el 
 
 ### Fotos de materiales
 
-La ficha permite cargar, reemplazar y quitar una foto JPG, PNG o WebP de hasta 10 MB. Se optimiza a un máximo de 800 píxeles por lado y se guarda junto al material en la base de datos. Las importaciones de Excel conservan la foto existente.
-
-En SQLite local, `npm run db:push` agrega la columna opcional `Item.foto`. En Render, el inicio verifica exclusivamente esa columna después de exigir `DATABASE_PURPOSE=compras`, y luego levanta la API.
+La ficha permite cargar, reemplazar y quitar una foto JPG, PNG o WebP de hasta 10 MB. Se optimiza a un máximo de 800 píxeles por lado y se guarda junto al material. Las importaciones de Excel conservan la foto existente.
 
 Aplicación full stack para gestionar órdenes de compra, proveedores y productos. Usa React/Vite, Tailwind, Express, Prisma y SQLite para iniciarse sin servicios externos.
 

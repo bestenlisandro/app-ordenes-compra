@@ -2,8 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { materialPhoto } = require('./materialPhoto');
-const { ensureMaterialPhotoColumn } = require('./ensureMaterialPhotoColumn');
+const { materialPhoto, packMaterialMedia, unpackMaterialMedia } = require('./materialPhoto');
 const { PrismaClient, OrderStatus } = require('@prisma/client');
 const { ROLE_PERMISSIONS, hashPassword, verifyPassword, signToken, readToken, publicUser } = require('./auth');
 
@@ -129,6 +128,7 @@ function materialData(body) {
     };
   }) : [];
   if (new Set(ofertas.map((oferta) => oferta.proveedorId)).size !== ofertas.length) throw new Error('Un proveedor no puede repetirse en el mismo material.');
+  const foto = materialPhoto(body.foto);
   return {
     item: {
       codigo: requiredString(body.codigo, 'código'),
@@ -149,12 +149,16 @@ function materialData(body) {
       costoEstandar: body.costoEstandar === '' || body.costoEstandar == null ? 0 : Number(body.costoEstandar),
       iva: body.iva === '' || body.iva == null ? 21 : Number(body.iva),
       atributosTecnicos: optionalString(body.atributosTecnicos),
-      documentacionUrl: optionalString(body.documentacionUrl),
-      foto: materialPhoto(body.foto),
+      documentacionUrl: foto === undefined ? optionalString(body.documentacionUrl) : packMaterialMedia(body.documentacionUrl, foto),
       precioUnitario: ofertas[0]?.precioSinIva || 0,
     },
     ofertas,
   };
+}
+
+function publicMaterial(item) {
+  const media = unpackMaterialMedia(item.documentacionUrl);
+  return { ...item, documentacionUrl: media.documentacionUrl, foto: media.foto };
 }
 
 function handleError(res, error) {
@@ -181,9 +185,9 @@ app.put('/api/suppliers/:id', permit('suppliers:manage'), async (req, res) => {
 app.delete('/api/suppliers/:id', permit('suppliers:manage'), async (req, res) => { try { await prisma.supplier.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
 
 // CRUD de productos
-app.get('/api/items', permit('catalog:read'), async (_req, res) => res.json(await prisma.item.findMany({ include: { ofertas: { include: { proveedor: true } } }, orderBy: { codigo: 'asc' } })));
+app.get('/api/items', permit('catalog:read'), async (_req, res) => res.json((await prisma.item.findMany({ include: { ofertas: { include: { proveedor: true } } }, orderBy: { codigo: 'asc' } })).map(publicMaterial)));
 app.post('/api/items', permit('items:manage'), async (req, res) => {
-  try { const data = materialData(req.body); res.status(201).json(await prisma.item.create({ data: { ...data.item, ofertas: { create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
+  try { const data = materialData(req.body); res.status(201).json(publicMaterial(await prisma.item.create({ data: { ...data.item, ofertas: { create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } }))); } catch (e) { handleError(res, e); }
 });
 app.post('/api/items/import', permit('items:manage'), async (req, res) => {
   try {
@@ -201,6 +205,8 @@ app.post('/api/items/import', permit('items:manage'), async (req, res) => {
         const existing = await prisma.item.findUnique({ where: { codigo: data.item.codigo } });
         if (existing && !updateExisting) { results.skipped += 1; continue; }
         if (existing) {
+          const previousMedia = unpackMaterialMedia(existing.documentacionUrl);
+          if (previousMedia.foto) data.item.documentacionUrl = packMaterialMedia(data.item.documentacionUrl, previousMedia.foto);
           await prisma.item.update({ where: { id: existing.id }, data: { ...data.item, stockActual } });
           results.updated += 1;
         } else {
@@ -216,7 +222,7 @@ app.post('/api/items/import', permit('items:manage'), async (req, res) => {
   } catch (e) { handleError(res, e); }
 });
 app.put('/api/items/:id', permit('items:manage'), async (req, res) => {
-  try { const data = materialData(req.body); res.json(await prisma.item.update({ where: { id: Number(req.params.id) }, data: { ...data.item, ofertas: { deleteMany: {}, create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } })); } catch (e) { handleError(res, e); }
+  try { const data = materialData(req.body); res.json(publicMaterial(await prisma.item.update({ where: { id: Number(req.params.id) }, data: { ...data.item, ofertas: { deleteMany: {}, create: data.ofertas } }, include: { ofertas: { include: { proveedor: true } } } }))); } catch (e) { handleError(res, e); }
 });
 app.delete('/api/items/:id', permit('items:manage'), async (req, res) => { try { await prisma.item.delete({ where: { id: Number(req.params.id) } }); res.status(204).end(); } catch (e) { handleError(res, e); } });
 
@@ -352,14 +358,4 @@ if (process.env.NODE_ENV === 'production') {
     next();
   });
 }
-async function start() {
-  // Render may retain an older dashboard start command instead of render.yaml.
-  // Verify the additive photo column here as well before accepting requests.
-  if (process.env.NODE_ENV === 'production') await ensureMaterialPhotoColumn(prisma);
-  app.listen(PORT, () => console.log(`API disponible en http://localhost:${PORT}`));
-}
-
-start().catch((error) => {
-  console.error('No se pudo iniciar la API:', error);
-  process.exit(1);
-});
+app.listen(PORT, () => console.log(`API disponible en http://localhost:${PORT}`));

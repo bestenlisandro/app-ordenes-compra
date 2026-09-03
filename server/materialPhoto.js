@@ -1,4 +1,5 @@
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
+const MEDIA_PREFIX = '__MATERIAL_MEDIA_V1__';
 
 function materialPhoto(value) {
   // Omitted photos must survive spreadsheet imports and older clients.
@@ -20,4 +21,20 @@ function materialPhoto(value) {
   return value;
 }
 
-module.exports = { materialPhoto };
+function packMaterialMedia(documentacionUrl, foto) {
+  const url = typeof documentacionUrl === 'string' && documentacionUrl.trim() ? documentacionUrl.trim() : null;
+  if (!foto) return url;
+  return MEDIA_PREFIX + JSON.stringify({ documentacionUrl: url, foto });
+}
+
+function unpackMaterialMedia(value) {
+  if (typeof value !== 'string' || !value.startsWith(MEDIA_PREFIX)) return { documentacionUrl: value || null, foto: null };
+  try {
+    const media = JSON.parse(value.slice(MEDIA_PREFIX.length));
+    return { documentacionUrl: media.documentacionUrl || null, foto: materialPhoto(media.foto) };
+  } catch {
+    return { documentacionUrl: null, foto: null };
+  }
+}
+
+module.exports = { materialPhoto, packMaterialMedia, unpackMaterialMedia };
