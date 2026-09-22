@@ -4,7 +4,8 @@ const cors = require('cors');
 const path = require('path');
 const { materialPhoto, packMaterialMedia, unpackMaterialMedia } = require('./materialPhoto');
 const { PrismaClient, OrderStatus } = require('@prisma/client');
-const { ROLE_PERMISSIONS, hashPassword, verifyPassword, signToken, readToken, publicUser } = require('./auth');
+const { ROLE_PERMISSIONS, verifyPassword, signToken, readToken, publicUser } = require('./auth');
+const { buildNewUserData, isSystemAdmin, updateUserAccount } = require('./userManagement');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -42,9 +43,9 @@ app.use('/api', async (req, res, next) => {
 const permit = (...permissions) => (req, res, next) => permissions.some((p) => req.user.permissions.includes(p)) ? next() : res.status(403).json({ error: 'No tiene permisos para realizar esta acción.' });
 
 app.get('/api/auth/me', (req, res) => res.json({ user: req.user }));
-app.get('/api/users', permit('users:manage','delegations:create'), async (_req, res) => res.json((await prisma.user.findMany({ where: { active: true }, orderBy: { nombre: 'asc' } })).map((u) => publicUser(u))));
-app.post('/api/users', permit('users:manage'), async (req, res) => { try { if (!roles.includes(req.body.role)) throw new Error('Rol inválido.'); const user = await prisma.user.create({ data: { username: requiredString(req.body.username, 'usuario').toLowerCase(), passwordHash: hashPassword(req.body.password), nombre: requiredString(req.body.nombre, 'nombre'), email: optionalString(req.body.email), role: req.body.role, costCenter: optionalString(req.body.costCenter), approvalLimit: req.body.approvalLimit === '' || req.body.approvalLimit == null ? null : Number(req.body.approvalLimit), supplierId: req.body.supplierId ? Number(req.body.supplierId) : null } }); await audit(req, 'CREATE', 'USER', user.id, { role: user.role }); res.status(201).json(publicUser(user)); } catch(e) { handleError(res,e); } });
-app.patch('/api/users/:id', permit('users:manage'), async (req,res)=>{ try { const data = {}; for (const key of ['nombre','email','costCenter']) if (key in req.body) data[key]=optionalString(req.body[key]); if ('active' in req.body) data.active=Boolean(req.body.active); if (req.body.role) { if(!roles.includes(req.body.role)) throw new Error('Rol inválido.'); data.role=req.body.role; } if ('approvalLimit' in req.body) data.approvalLimit=req.body.approvalLimit===''?null:Number(req.body.approvalLimit); if(req.body.password) data.passwordHash=hashPassword(req.body.password); const user=await prisma.user.update({where:{id:Number(req.params.id)},data}); await audit(req,'UPDATE','USER',user.id,{fields:Object.keys(data)}); res.json(publicUser(user)); }catch(e){handleError(res,e)} });
+app.get('/api/users', permit('users:manage','delegations:create'), async (req, res) => { const includeInactive = isSystemAdmin(req.user) && req.query.includeInactive === 'true'; res.json((await prisma.user.findMany({ where: includeInactive ? {} : { active: true }, orderBy: [{ active: 'desc' }, { nombre: 'asc' }] })).map((u) => publicUser(u))); });
+app.post('/api/users', permit('users:manage'), async (req, res) => { try { if (!isSystemAdmin(req.user)) { const error = new Error('Solo un administrador puede crear usuarios.'); error.statusCode = 403; throw error; } const user = await prisma.user.create({ data: buildNewUserData(req.body, roles) }); await audit(req, 'CREATE', 'USER', user.id, { role: user.role }); res.status(201).json(publicUser(user)); } catch(e) { handleError(res,e); } });
+app.patch('/api/users/:id', async (req,res)=>{ try { res.json(await updateUserAccount(prisma, { actor: req.user, targetId: Number(req.params.id), body: req.body, ipAddress: req.ip, roles })); }catch(e){handleError(res,e)} });
 app.get('/api/delegations', permit('delegations:create','delegations:manage'), async (req,res)=>res.json(await prisma.delegation.findMany({where:req.user.role==='SYSTEM_ADMIN'?{}:{OR:[{delegatorId:req.user.id},{delegateId:req.user.id}]},include:{delegator:{select:{id:true,nombre:true,role:true}},delegate:{select:{id:true,nombre:true,role:true}}},orderBy:{createdAt:'desc'}})));
 app.post('/api/delegations', permit('delegations:create','delegations:manage'), async (req,res)=>{try{const delegatorId=req.user.role==='SYSTEM_ADMIN'&&req.body.delegatorId?Number(req.body.delegatorId):req.user.id;const delegateId=Number(req.body.delegateId),startsAt=new Date(req.body.startsAt),endsAt=new Date(req.body.endsAt);if(delegateId===delegatorId||Number.isNaN(startsAt.getTime())||!(endsAt>startsAt))throw new Error('Delegación inválida.');const delegation=await prisma.delegation.create({data:{delegatorId,delegateId,startsAt,endsAt}});await audit(req,'CREATE','DELEGATION',delegation.id);res.status(201).json(delegation)}catch(e){handleError(res,e)}});
 app.get('/api/audit', permit('audit:read'), async (_req,res)=>res.json(await prisma.auditLog.findMany({include:{user:{select:{username:true,nombre:true}}},orderBy:{createdAt:'desc'},take:250})));
@@ -163,7 +164,8 @@ function publicMaterial(item) {
 }
 
 function handleError(res, error) {
-  console.error(error);
+  console.error({ name: error.name, code: error.code, message: error.message });
+  if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
   if (error.code === 'P2002') return res.status(409).json({ error: 'Ya existe un registro con ese valor único.' });
   if (error.code === 'P2003') return res.status(409).json({ error: 'No se puede eliminar: el registro está en uso.' });
   return res.status(400).json({ error: error.message || 'No se pudo procesar la solicitud.' });
