@@ -4,7 +4,7 @@ import { REQUEST_STATUS_LABELS } from './RequesterRequests';
 
 const when = (value) => new Date(value).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
 
-export default function AdminRequestTracking({ orderId, suppliers, onClose, onUpdated }) {
+export default function AdminRequestTracking({ user, orderId, suppliers, onClose, onUpdated }) {
   const [order, setOrder] = useState(null);
   const [status, setStatus] = useState('RECEIVED_REQUEST');
   const [message, setMessage] = useState('');
@@ -41,7 +41,7 @@ export default function AdminRequestTracking({ orderId, suppliers, onClose, onUp
     {error && <p className="notice notice-error">{error}</p>}
     {!order ? <p className="request-empty">Cargando…</p> : <>
       <section><h3>Proveedor</h3><div className="admin-tracking-row"><select className="field" value={supplierId} onChange={(event) => setSupplierId(event.target.value)}><option value="">Sin proveedor</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}</select><button type="button" className="btn-secondary" onClick={updateSupplier} disabled={saving}>Guardar proveedor</button></div></section>
-      <section><h3>Estado y mensaje</h3><div className="admin-tracking-fields"><label className="label">Estado visible<select className="field mt-1" value={status} onChange={(event) => setStatus(event.target.value)}>{Object.entries(REQUEST_STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="label">Mensaje para el solicitante<textarea className="field mt-1" rows="3" maxLength="1000" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ej.: Pedido realizado. Entrega estimada jueves." /></label><button type="button" className="btn-primary" onClick={updateTracking} disabled={saving}>{saving ? 'Guardando…' : 'Actualizar seguimiento'}</button></div></section>
+      {user?.role === 'SYSTEM_ADMIN' && <section><h3>Estado y mensaje</h3><div className="admin-tracking-fields"><label className="label">Estado visible<select className="field mt-1" value={status} onChange={(event) => setStatus(event.target.value)}>{Object.entries(REQUEST_STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="label">Mensaje para el solicitante<textarea className="field mt-1" rows="3" maxLength="1000" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ej.: Pedido realizado. Entrega estimada jueves." /></label><button type="button" className="btn-primary" onClick={updateTracking} disabled={saving}>{saving ? 'Guardando…' : 'Actualizar seguimiento'}</button></div></section>}
       <section><h3>Historial visible</h3><div className="request-timeline">{(order.requestStatusHistory || []).map((entry) => <article key={entry.id}><span/><div><strong>{REQUEST_STATUS_LABELS[entry.status] || entry.status}</strong><time>{when(entry.createdAt)} · {entry.changedBy?.nombre || 'Sistema'}</time>{entry.message && <p>{entry.message}</p>}</div></article>)}</div></section>
     </>}
   </section></div>;

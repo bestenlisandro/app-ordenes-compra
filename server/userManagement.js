@@ -1,6 +1,6 @@
 const { hashPassword, publicUser } = require('./auth');
 
-const REQUESTER_FLAGS = ['canChooseSupplier', 'canUseCatalogItem', 'canUseFreeItem'];
+const REQUESTER_FLAGS = ['canUseCatalogItem', 'canUseFreeItem'];
 const ALLOWED_FIELDS = new Set(['nombre', 'email', 'role', 'costCenter', 'approvalLimit', 'active', 'newPassword', ...REQUESTER_FLAGS]);
 
 function optionalString(value) {
@@ -26,7 +26,6 @@ function buildNewUserData(body, roles) {
     costCenter: optionalString(body.costCenter),
     approvalLimit,
     supplierId: body.supplierId ? Number(body.supplierId) : null,
-    canChooseSupplier: body.canChooseSupplier !== false,
     canUseCatalogItem: body.canUseCatalogItem !== false,
     canUseFreeItem: body.canUseFreeItem !== false,
   };

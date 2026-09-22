@@ -8,7 +8,6 @@ CREATE TYPE "RequestVisibleStatus" AS ENUM (
 );
 
 ALTER TABLE "User"
-  ADD COLUMN "canChooseSupplier" BOOLEAN NOT NULL DEFAULT true,
   ADD COLUMN "canUseCatalogItem" BOOLEAN NOT NULL DEFAULT true,
   ADD COLUMN "canUseFreeItem" BOOLEAN NOT NULL DEFAULT true;
 

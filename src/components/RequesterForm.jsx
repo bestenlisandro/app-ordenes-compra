@@ -5,14 +5,12 @@ const blankItem = (user) => ({ tipo: user.canUseCatalogItem !== false ? 'CATALOG
 
 export default function RequesterForm({ user, onCancel, onCreated }) {
   const [items, setItems] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
-  const [form, setForm] = useState({ proveedorId: '', fechaEntregaEsperada: '', lugarEntrega: '', observaciones: '', items: [blankItem(user)] });
+  const [form, setForm] = useState({ fechaEntregaEsperada: '', lugarEntrega: '', observaciones: '', items: [blankItem(user)] });
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (user.canUseCatalogItem !== false) fetch('/api/items').then((response) => response.ok ? response.json() : []).then(setItems).catch(() => setError('No se pudo cargar el catálogo.'));
-    if (user.canChooseSupplier !== false) fetch('/api/suppliers').then((response) => response.ok ? response.json() : []).then(setSuppliers).catch(() => setError('No se pudieron cargar los proveedores.'));
   }, [user]);
 
   const update = (name, value) => setForm((current) => ({ ...current, [name]: value }));
@@ -37,9 +35,9 @@ export default function RequesterForm({ user, onCancel, onCreated }) {
     {error && <p className="notice notice-error" role="alert">{error}</p>}
     {!hasItemMode && <p className="notice notice-error">Su usuario no tiene habilitada ninguna modalidad de ítem. Contacte a un administrador.</p>}
     <section className="request-card"><div className="request-grid">
+      <label className="label">Centro de costo<input className="field mt-1" value={user.costCenter || 'Sin asignar'} readOnly /></label>
       <label className="label">Fecha requerida<input type="date" className="field mt-1" value={form.fechaEntregaEsperada} onChange={(event) => update('fechaEntregaEsperada', event.target.value)} /></label>
-      <label className="label">Lugar de entrega<input className="field mt-1" value={form.lugarEntrega} onChange={(event) => update('lugarEntrega', event.target.value)} placeholder="Planta, depósito o sector" /></label>
-      {user.canChooseSupplier !== false && <label className="label request-wide">Proveedor sugerido (opcional)<select className="field mt-1" value={form.proveedorId} onChange={(event) => update('proveedorId', event.target.value)}><option value="">Sin proveedor sugerido</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}</select></label>}
+      <label className="label request-wide">Lugar de entrega<input className="field mt-1" value={form.lugarEntrega} onChange={(event) => update('lugarEntrega', event.target.value)} placeholder="Planta, depósito o sector" /></label>
     </div></section>
     <section className="request-card"><header className="request-section-heading"><div><h2>Productos o servicios</h2><p>No es necesario indicar precios.</p></div><button type="button" className="btn-secondary" onClick={addItem} disabled={!hasItemMode}><Plus size={16}/> Agregar ítem</button></header>
       <div className="request-items">{form.items.map((item, index) => <article className="request-item" key={index}>

@@ -44,7 +44,6 @@ model User {
   approvalLimit   Decimal?
   supplierId      Int?
   active          Boolean      @default(true)
-  canChooseSupplier Boolean    @default(true)
   canUseCatalogItem Boolean    @default(true)
   canUseFreeItem  Boolean      @default(true)
   delegationsFrom Delegation[] @relation("Delegator")

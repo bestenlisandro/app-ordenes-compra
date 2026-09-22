@@ -1,5 +1,5 @@
 const REQUEST_VISIBLE_STATUSES = ['RECEIVED_REQUEST', 'ORDERED_FROM_SUPPLIER', 'PARTIALLY_DELIVERED', 'DELIVERED', 'CANCELLED'];
-const REQUEST_BODY_FIELDS = new Set(['proveedorId', 'fechaEntregaEsperada', 'lugarEntrega', 'observaciones', 'items']);
+const REQUEST_BODY_FIELDS = new Set(['fechaEntregaEsperada', 'lugarEntrega', 'observaciones', 'items']);
 const REQUEST_ITEM_FIELDS = new Set(['tipo', 'productoId', 'codigoLibre', 'descripcionLibre', 'cantidad', 'unidad']);
 
 const text = (value, max) => {
@@ -22,10 +22,17 @@ function canReadOrder(user, order) {
 
 function requesterCapabilities(user) {
   return {
-    canChooseSupplier: user?.canChooseSupplier !== false,
     canUseCatalogItem: user?.canUseCatalogItem !== false,
     canUseFreeItem: user?.canUseFreeItem !== false,
   };
+}
+
+function canAccessSupplierDirectory(user) {
+  return !isRequester(user);
+}
+
+function canAssignRequestSupplier(user) {
+  return ['SYSTEM_ADMIN', 'BUYER'].includes(user?.role);
 }
 
 function validateRequesterSubmission(user, body) {
@@ -34,9 +41,6 @@ function validateRequesterSubmission(user, body) {
   const unexpected = Object.keys(body).filter((key) => !REQUEST_BODY_FIELDS.has(key));
   if (unexpected.length) throw new Error(`Campos no permitidos en la solicitud: ${unexpected.join(', ')}.`);
   if (!Array.isArray(body.items) || !body.items.length) throw new Error('La solicitud debe tener al menos un ítem.');
-  const proveedorId = body.proveedorId === '' || body.proveedorId == null ? null : Number(body.proveedorId);
-  if (proveedorId != null && (!Number.isInteger(proveedorId) || proveedorId <= 0)) throw new Error('El proveedor sugerido no es válido.');
-  if (proveedorId != null && !capabilities.canChooseSupplier) throw new Error('No tiene permiso para sugerir un proveedor.');
   const items = body.items.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Uno de los ítems no es válido.');
     const invalidFields = Object.keys(item).filter((key) => !REQUEST_ITEM_FIELDS.has(key));
@@ -58,16 +62,11 @@ function validateRequesterSubmission(user, body) {
     return { tipo: 'LIBRE', codigoLibre: text(item.codigoLibre, 100), descripcionLibre, cantidad, unidad };
   });
   return {
-    proveedorId,
     fechaEntregaEsperada: text(body.fechaEntregaEsperada, 20),
     lugarEntrega: text(body.lugarEntrega, 500),
     observaciones: text(body.observaciones, 2000),
     items,
   };
-}
-
-function safeSupplier(supplier) {
-  return supplier ? { id: supplier.id, nombre: supplier.nombre } : null;
 }
 
 function safeCatalogItem(item) {
@@ -109,14 +108,16 @@ function safeRequestOrder(order) {
     observaciones: order.observaciones,
     lugarEntrega: order.lugarEntrega,
     requesterVisibleStatus: order.requesterVisibleStatus,
-    proveedor: safeSupplier(order.proveedor),
-    items: (order.items || []).map((line) => ({
-      id: line.id,
-      cantidad: line.cantidad,
-      unidad: line.unidadSolicitada || line.producto?.unidadMedida || line.producto?.unidadCompra || 'u.',
-      codigo: line.codigoProveedor || line.producto?.codigo || null,
-      descripcion: line.nombreProveedor || line.producto?.descripcion || 'Ítem solicitado',
-    })),
+    items: (order.items || []).map((line) => {
+      const isFreeItem = line.producto?.codigo === '__ITEM_LIBRE__';
+      return {
+        id: line.id,
+        cantidad: line.cantidad,
+        unidad: line.unidadSolicitada || line.producto?.unidadMedida || line.producto?.unidadCompra || 'u.',
+        codigo: isFreeItem ? line.codigoProveedor || null : line.producto?.codigo || null,
+        descripcion: isFreeItem ? line.nombreProveedor || 'Ítem solicitado' : line.producto?.descripcion || 'Ítem solicitado',
+      };
+    }),
     history,
     lastMessage: lastWithMessage?.message || null,
     updatedAt: order.updatedAt,
@@ -136,12 +137,13 @@ function validateVisibleStatusUpdate(user, body) {
 
 module.exports = {
   REQUEST_VISIBLE_STATUSES,
+  canAccessSupplierDirectory,
+  canAssignRequestSupplier,
   canReadOrder,
   isRequester,
   requesterCapabilities,
   safeCatalogItem,
   safeRequestOrder,
-  safeSupplier,
   validateRequesterSubmission,
   validateVisibleStatusUpdate,
 };
