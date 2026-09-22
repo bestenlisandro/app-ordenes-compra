@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 const ROLES = { SYSTEM_ADMIN: 'Administrador', REQUESTER: 'Solicitante', APPROVER: 'Aprobador', BUYER: 'Compras', RECEIVER: 'Recepción', FINANCE: 'Finanzas', VENDOR: 'Proveedor' };
-const EMPTY_USER = { username: '', password: '', nombre: '', email: '', role: 'REQUESTER', costCenter: '', approvalLimit: '' };
+const EMPTY_USER = { username: '', password: '', nombre: '', email: '', role: 'REQUESTER', costCenter: '', approvalLimit: '', canChooseSupplier: true, canUseCatalogItem: true, canUseFreeItem: true };
 
 export default function AccessManagement({ user }) {
   const [users, setUsers] = useState([]);
@@ -45,7 +45,7 @@ export default function AccessManagement({ user }) {
 
   const openEditor = (account) => {
     setEditing(account);
-    setEditForm({ nombre: account.nombre || '', email: account.email || '', role: account.role, costCenter: account.costCenter || '', approvalLimit: account.approvalLimit ?? '', newPassword: '', confirmPassword: '' });
+    setEditForm({ nombre: account.nombre || '', email: account.email || '', role: account.role, costCenter: account.costCenter || '', approvalLimit: account.approvalLimit ?? '', canChooseSupplier: account.canChooseSupplier !== false, canUseCatalogItem: account.canUseCatalogItem !== false, canUseFreeItem: account.canUseFreeItem !== false, newPassword: '', confirmPassword: '' });
     setMessage('');
   };
   const closeEditor = () => { if (!saving) { setEditing(null); setEditForm(null); } };
@@ -62,7 +62,7 @@ export default function AccessManagement({ user }) {
     if (editForm.newPassword && editForm.newPassword.length < 8) return notify('La nueva contraseña debe tener al menos 8 caracteres.', 'error');
     setSaving(true);
     try {
-      const payload = { nombre: editForm.nombre, email: editForm.email, role: editForm.role, costCenter: editForm.costCenter, approvalLimit: editForm.approvalLimit };
+      const payload = { nombre: editForm.nombre, email: editForm.email, role: editForm.role, costCenter: editForm.costCenter, approvalLimit: editForm.approvalLimit, canChooseSupplier: editForm.canChooseSupplier, canUseCatalogItem: editForm.canUseCatalogItem, canUseFreeItem: editForm.canUseFreeItem };
       if (editForm.newPassword) payload.newPassword = editForm.newPassword;
       const updated = await patchUser(editing.id, payload);
       setEditing(updated); setEditForm((current) => ({ ...current, newPassword: '', confirmPassword: '' }));
@@ -92,6 +92,7 @@ export default function AccessManagement({ user }) {
         <Field label="Correo electrónico" type="email" required={false} value={form.email} set={(value) => setForm({ ...form, email: value })} />
         <Field label="Centro de costos" required={false} value={form.costCenter} set={(value) => setForm({ ...form, costCenter: value })} />
         <Field label="Límite de aprobación" type="number" min="0" required={false} value={form.approvalLimit} set={(value) => setForm({ ...form, approvalLimit: value })} />
+        {form.role === 'REQUESTER' && <RequesterPermissions value={form} set={setForm} />}
       </div></div><div className="form-actions"><button className="btn-primary" disabled={saving}>{saving ? 'Creando…' : 'Crear usuario'}</button></div></form>
       <section className="materials-list">
         <div className="list-heading"><div><h2>Usuarios</h2><p>{showInactive ? 'Activos e inactivos' : 'Usuarios con acceso activo'}</p></div><label className="user-filter"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> Mostrar inactivos</label></div>
@@ -116,6 +117,7 @@ export default function AccessManagement({ user }) {
         <Field label="Nueva contraseña" type="password" minLength={8} required={false} autoComplete="new-password" value={editForm.newPassword} set={(value) => setEditForm({ ...editForm, newPassword: value })} />
         <Field label="Confirmar contraseña" type="password" minLength={8} required={Boolean(editForm.newPassword)} autoComplete="new-password" value={editForm.confirmPassword} set={(value) => setEditForm({ ...editForm, confirmPassword: value })} />
         <p className="user-password-help">Deje ambos campos vacíos para conservar la contraseña actual.</p>
+        {editForm.role === 'REQUESTER' && <RequesterPermissions value={editForm} set={setEditForm} />}
       </div><div className="user-status-action"><div><strong>Acceso a la aplicación</strong><span>{editing.active ? 'Este usuario puede iniciar sesión.' : 'Este usuario no puede iniciar sesión.'}</span></div><button type="button" className={editing.active ? 'btn-danger' : 'btn-secondary'} disabled={saving || (editing.active && editing.id === user.id)} onClick={changeStatus}>{editing.active ? 'Desactivar usuario' : 'Activar usuario'}</button></div>
       {editing.active && editing.id === user.id && <p className="user-self-help">No puede desactivar su propio usuario mientras tiene la sesión iniciada.</p>}
       <div className="form-actions"><button type="button" className="btn-secondary" onClick={closeEditor} disabled={saving}>Cancelar</button><button className="btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button></div></form>
@@ -125,3 +127,4 @@ export default function AccessManagement({ user }) {
 
 function RoleField({ value, set }) { return <label className="label">Rol<select className="field mt-1" value={value} onChange={(event) => set(event.target.value)}>{Object.entries(ROLES).map(([role, label]) => <option key={role} value={role}>{label}</option>)}</select></label>; }
 function Field({ label, type = 'text', value, set, required = true, readOnly = false, ...props }) { return <label className="label">{label}<input className="field mt-1" type={type} required={required} readOnly={readOnly} value={value} onChange={set ? (event) => set(event.target.value) : undefined} {...props} /></label>; }
+function RequesterPermissions({ value, set }) { return <fieldset className="requester-permissions"><legend>Permisos del solicitante</legend><label><input type="checkbox" checked={value.canChooseSupplier} onChange={(event) => set({ ...value, canChooseSupplier: event.target.checked })} /> Puede sugerir proveedor</label><label><input type="checkbox" checked={value.canUseCatalogItem} onChange={(event) => set({ ...value, canUseCatalogItem: event.target.checked })} /> Puede usar materiales del catálogo</label><label><input type="checkbox" checked={value.canUseFreeItem} onChange={(event) => set({ ...value, canUseFreeItem: event.target.checked })} /> Puede escribir ítems libres</label></fieldset>; }

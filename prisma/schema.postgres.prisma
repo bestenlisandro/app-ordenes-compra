@@ -25,6 +25,14 @@ enum UserRole {
   VENDOR
 }
 
+enum RequestVisibleStatus {
+  RECEIVED_REQUEST
+  ORDERED_FROM_SUPPLIER
+  PARTIALLY_DELIVERED
+  DELIVERED
+  CANCELLED
+}
+
 model User {
   id              Int          @id @default(autoincrement())
   username        String       @unique
@@ -36,9 +44,13 @@ model User {
   approvalLimit   Decimal?
   supplierId      Int?
   active          Boolean      @default(true)
+  canChooseSupplier Boolean    @default(true)
+  canUseCatalogItem Boolean    @default(true)
+  canUseFreeItem  Boolean      @default(true)
   delegationsFrom Delegation[] @relation("Delegator")
   delegationsTo   Delegation[] @relation("Delegate")
   auditLogs       AuditLog[]
+  requestStatusChanges RequestStatusHistory[]
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 }
@@ -164,10 +176,10 @@ model StockMovement {
 model PurchaseOrder {
   id                   Int         @id @default(autoincrement())
   numeroOrden          String      @unique
-  proveedorId          Int
+  proveedorId          Int?
   requestedById        Int?
   costCenter           String?
-  proveedor            Supplier    @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  proveedor            Supplier?   @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
   fechaEmision         DateTime    @default(now())
   fechaEntregaEsperada DateTime?
   estado               OrderStatus @default(BORRADOR)
@@ -190,7 +202,9 @@ model PurchaseOrder {
   firmaAutorizacion    String?
   terminosCondiciones  String?
   observaciones        String?
+  requesterVisibleStatus RequestVisibleStatus @default(RECEIVED_REQUEST)
   items                OrderItem[]
+  requestStatusHistory RequestStatusHistory[]
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
 }
@@ -206,4 +220,18 @@ model OrderItem {
   subtotalLinea  Decimal
   codigoProveedor String?
   nombreProveedor String?
+  unidadSolicitada String?
+}
+
+model RequestStatusHistory {
+  id              Int                  @id @default(autoincrement())
+  purchaseOrderId Int
+  status          RequestVisibleStatus
+  message         String?
+  changedById     Int
+  purchaseOrder   PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  changedBy       User                 @relation(fields: [changedById], references: [id], onDelete: Restrict)
+  createdAt       DateTime             @default(now())
+
+  @@index([purchaseOrderId, createdAt])
 }

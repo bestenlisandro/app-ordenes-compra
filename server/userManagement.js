@@ -1,6 +1,7 @@
 const { hashPassword, publicUser } = require('./auth');
 
-const ALLOWED_FIELDS = new Set(['nombre', 'email', 'role', 'costCenter', 'approvalLimit', 'active', 'newPassword']);
+const REQUESTER_FLAGS = ['canChooseSupplier', 'canUseCatalogItem', 'canUseFreeItem'];
+const ALLOWED_FIELDS = new Set(['nombre', 'email', 'role', 'costCenter', 'approvalLimit', 'active', 'newPassword', ...REQUESTER_FLAGS]);
 
 function optionalString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -25,6 +26,9 @@ function buildNewUserData(body, roles) {
     costCenter: optionalString(body.costCenter),
     approvalLimit,
     supplierId: body.supplierId ? Number(body.supplierId) : null,
+    canChooseSupplier: body.canChooseSupplier !== false,
+    canUseCatalogItem: body.canUseCatalogItem !== false,
+    canUseFreeItem: body.canUseFreeItem !== false,
   };
 }
 
@@ -53,6 +57,12 @@ function parseUserUpdate(body, roles) {
       const limit = Number(body.approvalLimit);
       if (!Number.isFinite(limit) || limit < 0) throw new Error('El límite de aprobación debe ser un número igual o mayor a cero.');
       data.approvalLimit = limit;
+    }
+  }
+  for (const flag of REQUESTER_FLAGS) {
+    if (flag in body) {
+      if (typeof body[flag] !== 'boolean') throw new Error(`El permiso ${flag} debe ser verdadero o falso.`);
+      data[flag] = body[flag];
     }
   }
   if ('newPassword' in body && typeof body.newPassword !== 'string') throw new Error('La nueva contraseña no es válida.');
@@ -88,7 +98,7 @@ async function updateUserAccount(prisma, { actor, targetId, body, ipAddress, rol
       if (activeAdmins <= 1) throw new Error('No puede desactivar ni cambiar el rol del último administrador activo.');
     }
     const user = await tx.user.update({ where: { id: targetId }, data: parsed.data });
-    const changedFields = ['nombre', 'email', 'role', 'costCenter', 'approvalLimit'].filter((field) => field in parsed.data && String(existing[field] ?? '') !== String(user[field] ?? ''));
+    const changedFields = ['nombre', 'email', 'role', 'costCenter', 'approvalLimit', ...REQUESTER_FLAGS].filter((field) => field in parsed.data && String(existing[field] ?? '') !== String(user[field] ?? ''));
     const audits = [];
     const addAudit = (action, details) => audits.push(tx.auditLog.create({ data: { userId: actor.id, action, entity: 'USER', entityId: String(targetId), details: JSON.stringify(details), ipAddress } }));
     if (changedFields.length) addAudit('USER_UPDATED', { fields: changedFields });

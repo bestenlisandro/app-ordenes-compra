@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, Boxes, Building2, CheckCircle2, ClipboardList, PackageSearch, Sparkles, TrendingUp } from 'lucide-react';
 
-export default function HomeView({ onNavigate }) {
+export default function HomeView({ onNavigate, user }) {
   const [data, setData] = useState({ items: [], suppliers: [], orders: [] });
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -17,6 +17,7 @@ export default function HomeView({ onNavigate }) {
   }, []);
   const lowStock = data.items.filter((item) => Number(item.stockActual) <= Number(item.stockMinimo || item.puntoPedido));
   const active = data.orders.filter((order) => !['RECIBIDA', 'CANCELADA'].includes(order.estado));
+  if (user?.role === 'REQUESTER') return <div className="page-stack"><section className="hero-panel"><div className="hero-copy"><span className="eyebrow"><Sparkles size={15}/> Solicitudes simples, seguimiento claro</span><h1>Pedí lo que necesitás.</h1><p>Enviá una solicitud sin cargar precios y consultá su avance en cualquier momento.</p><div className="hero-actions"><button className="btn-accent" onClick={() => onNavigate('new')}><ClipboardList size={18}/> Nueva solicitud</button><button className="btn-ghost-light" onClick={() => onNavigate('list')}>Mis solicitudes <ArrowRight size={17}/></button></div></div><div className="hero-visual" aria-hidden="true"><div className="visual-card main"><span>Mis solicitudes</span><strong>{data.orders.length} enviadas</strong></div><div className="visual-card floating"><CheckCircle2/><span>Seguimiento centralizado</span></div></div></section><section className="quick-panel"><div><span className="eyebrow dark">Cómo funciona</span><h2>Solicitá y seguí el estado.</h2><p>Elegí un material o describí libremente lo que necesitás. Compras gestionará proveedores, precios y condiciones.</p></div><div className="steps">{[['01','Solicitá','Indicá producto, cantidad y fecha requerida.'],['02','Seguimiento','Consultá el estado y los mensajes de Compras.'],['03','Recibí','Confirmá cuándo el pedido fue entregado.']].map(([number,title,description]) => <article key={number}><span>{number}</span><div><strong>{title}</strong><p>{description}</p></div></article>)}</div></section></div>;
   return <div className="page-stack">
     <section className="hero-panel">
       <div className="hero-copy"><span className="eyebrow"><Sparkles size={15}/> Compras simples, decisiones mejores</span><h1>Todo lo que necesitás para comprar con confianza.</h1><p>Centralizá materiales, proveedores, stock y órdenes de compra en una experiencia clara, rápida y profesional.</p><div className="hero-actions"><button className="btn-accent" onClick={() => onNavigate('catalog')}><PackageSearch size={18}/> Explorar catálogo</button><button className="btn-ghost-light" onClick={() => onNavigate('new')}>Crear orden <ArrowRight size={17}/></button></div></div>

@@ -1,0 +1,2 @@
+# Managed for the production PostgreSQL schema.
+provider = "postgresql"
