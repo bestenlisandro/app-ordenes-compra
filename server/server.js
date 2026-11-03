@@ -1,3 +1,4 @@
+const { managementReport } = require('./managementReport');
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -576,6 +577,16 @@ app.patch('/api/orders/:id/status', permit('orders:approve','orders:buy','orders
 
 // Las compras se agrupan por fecha de emisión en la hora local de Rosario (UTC−03:00).
 const reportMonth = (date) => new Date(date.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 7);
+
+app.get('/api/dashboard/management', permit('reports:read'), async (req, res) => {
+  if (isRequester(req.user)) return res.status(403).json({ error: 'No tiene permisos para consultar reportes.' });
+  try {
+    return res.json(await managementReport(prisma, req.query));
+  } catch (error) {
+    if (error.statusCode === 400) return res.status(400).json({ error: error.message });
+    throw error;
+  }
+});
 
 app.get('/api/reports/purchases', permit('reports:read'), async (req, res) => {
   if (isRequester(req.user)) return res.status(403).json({ error: 'No tiene permisos para consultar reportes.' });
