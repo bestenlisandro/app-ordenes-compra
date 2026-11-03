@@ -41,23 +41,14 @@ function summarize(orders) {
 function attention(orders, now) {
   const today = dayOf(now);
   const open = orders.filter((order) => OPEN.includes(order.estado));
-  // Alto valor relativo: cuartil superior con al menos cuatro importes positivos en la misma moneda.
-  const thresholds = new Map();
-  for (const currency of new Set(open.map((order) => order.moneda))) {
-    const values = open.filter((order) => order.moneda === currency && order.total.gt(0))
-      .map((order) => order.total).sort((a, b) => a.cmp(b));
-    if (values.length >= 4 && !values[0].eq(values.at(-1))) thresholds.set(currency, values[Math.floor(values.length * .75)]);
-  }
   return open.flatMap((order) => {
     const late = order.fechaEntregaEsperada ? today - dayOf(order.fechaEntregaEsperada) : 0;
     const age = today - dayOf(order.fechaEmision);
-    const threshold = thresholds.get(order.moneda);
     const overdue = late > 0;
-    const high = threshold && order.total.gte(threshold);
     const old = order.estado === 'BORRADOR' && age >= 14;
-    if (!overdue && !high && !old) return [];
-    return [{ ...order, priority: overdue ? 1 : high ? 2 : 3, days: overdue ? late : old ? age : 0,
-      reason: overdue ? `Entrega vencida hace ${late} d` : high ? 'Monto en el cuartil superior de órdenes abiertas' : `Borrador de ${age} días` }];
+    if (!overdue && !old) return [];
+    return [{ ...order, priority: overdue ? 1 : 2, days: overdue ? late : old ? age : 0,
+      reason: overdue ? `Entrega vencida hace ${late} d` : `Borrador de ${age} días` }];
   }).sort((a, b) => a.priority - b.priority || b.days - a.days
     || (a.moneda === b.moneda ? b.total.cmp(a.total) : a.moneda.localeCompare(b.moneda)) || b.id - a.id);
 }
@@ -162,7 +153,7 @@ async function managementReport(db, query, now = new Date()) {
     filters: { from, to, previousFrom, previousTo: shift(from, -1) },
     suppliers, centers: centers.map((row) => row.costCenter).filter(Boolean), monetary,
     kpis: { ...summarize(current), spend: undefined, ticket: undefined, attention: critical.length },
-    previousCount: prior.length,
+    previousCount: prior.filter((order) => order.estado !== 'CANCELADA').length,
     statusDistribution: Object.values(OrderStatus).map((estado) => ({ estado, count: current.filter((order) => order.estado === estado).length })),
     criticalOrders: critical.slice(0, 7),
   };

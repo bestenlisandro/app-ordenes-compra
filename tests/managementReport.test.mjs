@@ -41,6 +41,7 @@ test('Dashboard gerencial con datos Prisma y permisos HTTP', async (t) => {
       fechaEmision: new Date(fechaEmision), estado, total, costCenter: 'Planta', ...extra },
   });
   await insert('SEP', 0, '2026-10-01T02:59:59Z', 'RECIBIDA', '100');
+  await insert('SEP-X', 0, '2026-09-15T12:00:00Z', 'CANCELADA', '999');
   const first = await insert('A', 0, '2026-10-01T03:00:00Z', 'ENVIADA', '200.1234', {
     fechaEntregaEsperada: new Date('2026-10-20T15:00:00Z'),
     items: { create: [
@@ -64,6 +65,13 @@ test('Dashboard gerencial con datos Prisma y permisos HTTP', async (t) => {
   assert.equal(ars.kpis.ticket.toString(), '85.03085');
   assert.equal(formatMoney(ars.kpis.spend.toString()).endsWith('340,12'), true);
   assert.equal(report.kpis.count, 6);
+  assert.equal(report.kpis.validCount, 5);
+  assert.equal(report.previousCount, 1);
+  assert.equal(ars.previous.validCount, 1);
+  const canceled = await managementReport(prisma, { from, status: 'CANCELADA' }, now);
+  assert.equal(canceled.kpis.count, 1);
+  assert.equal(canceled.kpis.validCount, 0);
+  assert.equal(canceled.statusDistribution.find((row) => row.estado === 'CANCELADA').count, 1);
   assert.equal(report.kpis.suppliers, 4);
   assert.equal(ars.pending.toString(), '320.1234');
   assert.equal(ars.previous.spend.toString(), '100');
@@ -100,4 +108,10 @@ test('Dashboard gerencial con datos Prisma y permisos HTTP', async (t) => {
   assert.equal(denied.status, 403);
   assert.deepEqual(Object.keys(await denied.json()), ['error']);
   assert.equal((await request(finance, '?from=2026-13')).status, 400);
+
+  const expensive = await insert('HIGH', 0, '2026-10-31T12:00:00Z', 'ENVIADA', '999999');
+  const updated = await managementReport(prisma, { from }, now);
+  assert.equal(updated.kpis.attention, 2);
+  assert.ok(updated.criticalOrders.some((order) => order.numeroOrden === 'OC-B' && order.priority === 2));
+  assert.ok(!updated.criticalOrders.some((order) => order.id === expensive.id));
 });

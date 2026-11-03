@@ -147,7 +147,7 @@ export default function ManagementDashboard({ onReview }) {
   const counts = data?.kpis;
   const cards = series && [
     [Wallet, 'Gasto del período', money(series.kpis.spend), `${pct(delta(series.kpis.spend, series.previous.spend))} vs. período anterior`],
-    [FileText, 'Órdenes de compra', integer.format(counts.count), `${percent.format(counts.count - data.previousCount)} OC vs. período anterior`],
+    [FileText, 'Órdenes de compra', integer.format(counts.validCount), `${percent.format(counts.validCount - data.previousCount)} OC no canceladas vs. período anterior`],
     [Activity, 'Ticket promedio', money(series.kpis.ticket), `${series.kpis.validCount} OC no canceladas en ${series.moneda}`],
     [Clock3, 'Valor pendiente', money(series.pending), 'Capital comprometido pendiente de recepción'],
     [Building2, 'Proveedores activos', integer.format(counts.suppliers), 'Con órdenes no canceladas'],
@@ -228,7 +228,7 @@ export default function ManagementDashboard({ onReview }) {
           </Panel>
           <Panel title="Período seleccionado vs. anterior" subtitle={`${showPeriod(data.filters.from, data.filters.to)} frente a ${showPeriod(data.filters.previousFrom, data.filters.previousTo)} · ${series.moneda}`}>
             <Table headers={['Indicador', 'Seleccionado', 'Anterior', 'Variación']}>
-              {[['Gasto', 'spend', money], ['Órdenes', 'count', integer.format], ['Ticket promedio', 'ticket', money], ['Proveedores activos', 'suppliers', integer.format]].map(([label, key, format]) => {
+              {[['Gasto', 'spend', money], ['Órdenes no canceladas', 'validCount', integer.format], ['Ticket promedio', 'ticket', money], ['Proveedores activos', 'suppliers', integer.format]].map(([label, key, format]) => {
                 const change = delta(series.kpis[key], series.previous[key]);
                 return <tr key={key}><td>{label}</td><td>{format(series.kpis[key])}</td><td>{format(series.previous[key])}</td>
                   <td className="whitespace-nowrap">{change > 0 ? '↑ ' : change < 0 ? '↓ ' : ''}{pct(change)}</td></tr>;
@@ -241,7 +241,7 @@ export default function ManagementDashboard({ onReview }) {
             </Table> : <Empty />}
           </Panel>
         </>}
-        <Panel title="Órdenes que requieren atención" subtitle="Prioridad: entrega vencida, monto en el cuartil superior de su moneda y borrador de 14 días o más.">
+        <Panel title="Órdenes que requieren atención" subtitle="Órdenes abiertas con entrega vencida o borradores de 14 días o más.">
           {data.criticalOrders.length ? <Table headers={['OC', 'Proveedor', 'Centro de costo', 'Fecha', 'Fecha esperada', 'Monto', 'Estado', 'Motivo', 'Acción']}>
             {data.criticalOrders.map((order) => <tr key={order.id}><td>{order.numeroOrden}</td><td>{order.proveedor?.nombre || '—'}</td><td>{order.costCenter || '—'}</td><td>{date.format(new Date(order.fechaEmision))}</td><td>{order.fechaEntregaEsperada ? date.format(new Date(order.fechaEntregaEsperada)) : '—'}</td><td className="whitespace-nowrap">{formatMoney(order.total, order.moneda)} ({order.moneda})</td><td>{states[order.estado]}</td><td className={order.priority === 1 ? 'text-red-700' : 'text-amber-800'}>{order.reason}</td><td><button className="btn-secondary" onClick={() => onReview(order.numeroOrden)}>Revisar</button></td></tr>)}
           </Table> : <Empty>No hay órdenes que requieran atención con estos filtros.</Empty>}
