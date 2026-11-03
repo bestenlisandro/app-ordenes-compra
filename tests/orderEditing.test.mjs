@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { formatMoney, parseUnitPrice, unitPriceInput } from '../src/utils/purchaseMoney.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -144,4 +145,85 @@ test('Edición de órdenes por HTTP con Prisma y SQLite local', async (t) => {
       assert.equal(await prisma.auditLog.count({ where: { action: 'ORDER_UPDATED' } }), 2);
     });
   }
+
+  await t.test('Precio unitario exacto en creación y edición, con cálculo decimal', async () => {
+    const order = { proveedorId: supplier.id, porcentajeImpuestos: 21, descuentos: 0.01,
+      items: [line(first, 100, 10.1234), line(second, 1, 10.1)] };
+    const created = await request('SYSTEM_ADMIN', 'POST', '', order);
+    assert.equal(created.status, 201);
+    assert.deepEqual(created.body.items.map((item) => item.precioUnitario), ['10.1234', '10.1']);
+    const edited = await request('BUYER', 'PATCH', '/' + created.body.id, {
+      ...order, items: [line(first, 100, parseUnitPrice('12,3456'))],
+    });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.estado, 'BORRADOR');
+    assert.equal(edited.body.items[0].precioUnitario, '12.3456');
+    assert.equal(edited.body.subtotal, '1234.56');
+    assert.equal(edited.body.impuestos, '259.2576');
+    assert.equal(edited.body.total, '1493.8076');
+    assert.match(formatMoney(edited.body.total, 'ARS'), /1\.493,81$/);
+    const invalid = { ...order, items: [line(first, 1, '10.12345')] };
+    assert.equal((await request('SYSTEM_ADMIN', 'POST', '', invalid)).status, 400);
+    assert.equal((await request('BUYER', 'PATCH', '/' + created.body.id, invalid)).status, 400);
+    const stored = await request('BUYER', 'GET', '/' + created.body.id);
+    assert.equal(stored.body.items[0].precioUnitario, '12.3456');
+  });
+
+  await t.test('Reportes filtran por proveedor, mes local y ambos, con totales separados por moneda', async () => {
+    const fixtures = [
+      [supplier.id, '2026-10-01T03:00:00Z', 'ARS', 'BORRADOR'],
+      [supplier.id, '2026-11-01T02:59:59Z', 'ARS', 'ENVIADA'],
+      [supplier.id, '2026-11-01T03:00:00Z', 'ARS', 'APROBADA'],
+      [otherSupplier.id, '2026-10-10T12:00:00Z', 'ARS', 'APROBADA'],
+      [supplier.id, '2026-10-10T12:00:00Z', 'USD', 'APROBADA'],
+      [supplier.id, '2026-10-10T12:00:00Z', 'ARS', 'CANCELADA'],
+    ];
+    const ids = [];
+    for (const [proveedorId, fecha, moneda, estado] of fixtures) {
+      const order = await request('SYSTEM_ADMIN', 'POST', '', {
+        proveedorId, moneda, porcentajeImpuestos: 0, items: [line(first, 1, '10.1234')],
+      });
+      assert.equal(order.status, 201);
+      ids.push(order.body.id);
+      await prisma.purchaseOrder.update({ where: { id: order.body.id }, data: { fechaEmision: new Date(fecha), estado } });
+    }
+
+    async function report(role, query) {
+      const response = await fetch(url + '/api/reports/purchases?' + query, {
+        headers: { Authorization: 'Bearer ' + signToken(users[role]) },
+      });
+      return { status: response.status, body: await response.json() };
+    }
+    const provider = 'proveedorId=' + supplier.id;
+    const bySupplier = await report('SYSTEM_ADMIN', provider);
+    assert.equal(bySupplier.status, 200);
+    assert.ok(bySupplier.body.monthly.every((group) => group.proveedor.id === supplier.id));
+    assert.ok(bySupplier.body.monthly.some((group) => group.month === '2026-11'));
+    const byMonth = await report('SYSTEM_ADMIN', 'mes=2026-10');
+    assert.equal(byMonth.status, 200);
+    assert.deepEqual(byMonth.body.monthly.flatMap((group) => group.orders.map((order) => order.id)).sort(), [ids[0], ids[1], ids[3], ids[4]].sort());
+    const combined = await report('SYSTEM_ADMIN', provider + '&mes=2026-10');
+    assert.equal(combined.status, 200);
+    const groups = Object.fromEntries(combined.body.monthly.map((group) => [group.moneda, group]));
+    assert.deepEqual(groups.ARS.orders.map((order) => order.id), [ids[1], ids[0]]);
+    assert.equal(groups.ARS.total, '20.2468');
+    assert.equal(groups.USD.total, '10.1234');
+    assert.equal(groups.ARS.orders[0].items[0].precioUnitario, '10.1234');
+    assert.equal((await report('SYSTEM_ADMIN', 'mes=2026-13')).status, 400);
+    const blocked = await report('REQUESTER', provider + '&mes=2026-10');
+    assert.equal(blocked.status, 403);
+    assert.deepEqual(Object.keys(blocked.body), ['error']);
+  });
+});
+
+test('El formulario admite coma o punto y presenta precios con cuatro decimales y totales con dos', () => {
+  for (const [input, expected] of [['10', '10'], ['10,5', '10.5'], ['10,55', '10.55'], ['10,555', '10.555'], ['10,5555', '10.5555'], ['10.1', '10.1']]) {
+    assert.equal(parseUnitPrice(input), expected);
+  }
+  assert.equal(parseUnitPrice('10,12345'), null);
+  assert.equal(unitPriceInput('12.3456'), '12,3456');
+  assert.equal(unitPriceInput('10.1'), '10,1000');
+  assert.match(formatMoney('12.3456', 'ARS', 4), /12,3456$/);
+  assert.match(formatMoney('1234.5600', 'ARS'), /1\.234,56$/);
+  assert.match(formatMoney('12.3', 'JPY'), /12,30$/);
 });

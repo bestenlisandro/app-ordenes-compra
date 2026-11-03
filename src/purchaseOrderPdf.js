@@ -1,3 +1,5 @@
+import { formatMoney } from './utils/purchaseMoney.mjs';
+
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 const show = (value) => escapeHtml(value || '—');
 const date = (value) => value ? new Date(value).toLocaleDateString('es-AR') : '—';
@@ -11,8 +13,8 @@ export async function generatePurchaseOrderPdf(orderId) {
     if (!response.ok) throw new Error('No se pudo cargar la orden.');
     const order = await response.json();
     const currency = order.moneda || 'ARS';
-    const money = (value) => { try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency }).format(Number(value)); } catch { return `${escapeHtml(currency)} ${Number(value).toFixed(2)}`; } };
-    const itemRows = order.items.map((line) => `<tr><td>${show(line.codigoProveedor || line.producto.codigo)}</td><td>${show(line.nombreProveedor || line.producto.descripcion)}</td><td class="num">${show(Number(line.cantidad))}</td><td class="num">${money(line.precioUnitario)}</td><td class="num">${money(line.subtotalLinea)}</td></tr>`).join('');
+    const money = (value, digits) => escapeHtml(formatMoney(value, currency, digits));
+    const itemRows = order.items.map((line) => `<tr><td>${show(line.codigoProveedor || line.producto.codigo)}</td><td>${show(line.nombreProveedor || line.producto.descripcion)}</td><td class="num">${show(Number(line.cantidad))}</td><td class="num">${money(line.precioUnitario, 4)}</td><td class="num">${money(line.subtotalLinea)}</td></tr>`).join('');
     popup.document.open();
     popup.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${escapeHtml(order.numeroOrden)} - Besten-Rodner Ingeniería SRL</title><style>
       @page{size:A4;margin:13mm}*{box-sizing:border-box}body{font:11px Arial,sans-serif;color:#172033;margin:0}h1,h2,p{margin:0}.header{display:flex;justify-content:space-between;border-bottom:3px solid #1d4ed8;padding-bottom:12px;margin-bottom:14px}.brand h1{font-size:21px;color:#1d4ed8}.brand p{margin-top:4px}.order{text-align:right}.order h2{font-size:19px}.order strong{display:block;font-size:15px;margin:5px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.box{border:1px solid #cbd5e1;border-radius:5px;padding:9px;break-inside:avoid}.box h2{font-size:11px;text-transform:uppercase;color:#1d4ed8;margin-bottom:7px}.line{margin:3px 0;white-space:pre-wrap}.label{font-weight:bold}table{width:100%;border-collapse:collapse;margin:12px 0;page-break-inside:auto}th{background:#eaf0ff;text-align:left}th,td{border:1px solid #cbd5e1;padding:6px}tr{page-break-inside:avoid}.num{text-align:right}.totals{margin-left:auto;width:43%;break-inside:avoid}.totals div{display:flex;justify-content:space-between;padding:4px 6px}.totals .grand{border-top:2px solid #172033;font-size:14px;font-weight:bold;margin-top:3px;padding-top:7px}.wide{margin:10px 0}.signature{margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:50px;text-align:center}.signature div{border-top:1px solid #172033;padding-top:5px}.actions{position:fixed;right:16px;top:16px}@media print{.actions{display:none}}@media screen{body{max-width:900px;margin:24px auto;padding:20px;box-shadow:0 0 12px #bbb}}

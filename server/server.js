@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { materialPhoto, packMaterialMedia, unpackMaterialMedia } = require('./materialPhoto');
-const { PrismaClient, OrderStatus } = require('@prisma/client');
+const { PrismaClient, Prisma, OrderStatus } = require('@prisma/client');
 const { ROLE_PERMISSIONS, verifyPassword, signToken, readToken, publicUser } = require('./auth');
 const { buildNewUserData, isSystemAdmin, updateUserAccount } = require('./userManagement');
 const { canAccessSupplierDirectory, canAssignRequestSupplier, canReadOrder, isRequester, safeCatalogItem, safeRequestOrder, validateRequesterSubmission, validateVisibleStatusUpdate } = require('./requesterOrders');
@@ -325,6 +325,17 @@ async function createRequesterOrder(req, res) {
   return res.status(201).json(safeRequestOrder(order));
 }
 
+function orderUnitPrice(value) {
+  if (!['number', 'string'].includes(typeof value) || !/^\d+(?:\.\d+)?$/.test(String(value))) {
+    throw new Error('El precio unitario debe ser un número mayor a cero.');
+  }
+  const price = new Prisma.Decimal(value);
+  if (!price.gt(0) || price.decimalPlaces() > 4) {
+    throw new Error('El precio unitario debe ser mayor a cero y tener hasta 4 decimales.');
+  }
+  return price;
+}
+
 async function buildOrderData(db, body) {
   const {
     proveedorId, fechaEntregaEsperada, lugarEntrega, observaciones, items,
@@ -351,36 +362,34 @@ async function buildOrderData(db, body) {
   const productById = new Map(products.map((product) => [product.id, product]));
   const lineas = items.map((item) => {
     const cantidad = Number(item.cantidad);
-    const precioIngresado = Number(item.precioUnitario);
+
     if (item.tipo === 'LIBRE') {
       const descripcion = requiredString(item.descripcionLibre, 'descripción del ítem libre');
       if (descripcion.length > 500) throw new Error('La descripción del ítem libre admite hasta 500 caracteres.');
-      if (!(cantidad > 0)) throw new Error('La cantidad del ítem libre debe ser mayor a cero.');
-      if (!(precioIngresado > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
+      if (!Number.isFinite(cantidad) || cantidad <= 0) throw new Error('La cantidad del ítem libre debe ser mayor a cero.');
+      const precioIngresado = orderUnitPrice(item.precioUnitario);
       const codigo = optionalString(item.codigoLibre);
       if (codigo && codigo.length > 100) throw new Error('El código del ítem libre admite hasta 100 caracteres.');
-      return { productoId: freeProduct.id, cantidad, precioUnitario: precioIngresado, subtotalLinea: cantidad * precioIngresado, codigoProveedor: codigo || '—', nombreProveedor: descripcion };
+      return { productoId: freeProduct.id, cantidad, precioUnitario: precioIngresado, subtotalLinea: precioIngresado.mul(cantidad), codigoProveedor: codigo || '—', nombreProveedor: descripcion };
     }
     const producto = productById.get(Number(item.productoId));
-    if (!producto || producto.codigo === FREE_ITEM_CODE || !(cantidad > 0)) throw new Error('Cada ítem debe tener producto y cantidad mayor a cero.');
-    const precioUnitario = item.precioUnitario == null ? decimal(producto.precioUnitario) : Number(item.precioUnitario);
-    if (!(precioUnitario > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
+    if (!producto || producto.codigo === FREE_ITEM_CODE || !Number.isFinite(cantidad) || cantidad <= 0) throw new Error('Cada ítem debe tener producto y cantidad mayor a cero.');
+    const precioUnitario = orderUnitPrice(item.precioUnitario ?? producto.precioUnitario.toDecimalPlaces(4).toFixed());
     const equivalencia = producto.ofertas.find((oferta) => oferta.proveedorId === proveedorId);
     return {
-      productoId: producto.id, cantidad, precioUnitario, subtotalLinea: cantidad * precioUnitario,
+      productoId: producto.id, cantidad, precioUnitario, subtotalLinea: precioUnitario.mul(cantidad),
       codigoProveedor: equivalencia?.codigoProveedor || producto.codigo,
       nombreProveedor: equivalencia?.nombreProveedor || producto.descripcion,
     };
   });
-  const subtotal = lineas.reduce((sum, item) => sum + item.subtotalLinea, 0);
+  const subtotal = lineas.reduce((sum, item) => sum.plus(item.subtotalLinea), new Prisma.Decimal(0));
   const tasa = porcentajeImpuestos === '' || porcentajeImpuestos == null ? TAX_RATE * 100 : Number(porcentajeImpuestos);
   const descuento = descuentos === '' || descuentos == null ? 0 : Number(descuentos);
   if (!Number.isFinite(tasa) || tasa < 0 || tasa > 100) throw new Error('El porcentaje de impuestos debe estar entre 0 y 100.');
-  if (!Number.isFinite(descuento) || descuento < 0 || descuento > subtotal) throw new Error('El descuento debe ser válido y no superar el subtotal.');
-  const impuestos = subtotal * tasa / 100;
+  if (!Number.isFinite(descuento) || descuento < 0 || subtotal.lt(descuento)) throw new Error('El descuento debe ser válido y no superar el subtotal.');
+  const impuestos = subtotal.mul(tasa).div(100);
   const fechaEntrega = fechaEntregaEsperada ? new Date(`${fechaEntregaEsperada}T12:00:00`) : null;
   if (fechaEntrega && Number.isNaN(fechaEntrega.getTime())) throw new Error('La fecha de entrega no es válida.');
-  if (![subtotal, impuestos, subtotal + impuestos - descuento].every(Number.isFinite)) throw new Error('Los importes de la orden deben ser finitos.');
   const data = {
     proveedorId, fechaEntregaEsperada: fechaEntrega,
     lugarEntrega: optionalString(lugarEntrega), observaciones: optionalString(observaciones),
@@ -393,7 +402,7 @@ async function buildOrderData(db, body) {
     condicionesPago: optionalString(condicionesPago), metodoEnvio: optionalString(metodoEnvio),
     direccionFacturacion: optionalString(direccionFacturacion), autorizadoPor: optionalString(autorizadoPor),
     firmaAutorizacion: optionalString(firmaAutorizacion), terminosCondiciones: optionalString(terminosCondiciones),
-    subtotal, impuestos, total: subtotal + impuestos - descuento,
+    subtotal, impuestos, total: subtotal.plus(impuestos).minus(descuento),
   };
   return { data, lineas };
 }
@@ -565,11 +574,60 @@ app.patch('/api/orders/:id/status', permit('orders:approve','orders:buy','orders
   } catch (e) { handleError(res, e); }
 });
 
-app.get('/api/reports/purchases', permit('reports:read'), async (_req, res) => {
-  const orders = await prisma.purchaseOrder.findMany({ include: { proveedor: true }, where: { estado: { not: 'CANCELADA' } } });
-  const bySupplier = Object.values(orders.reduce((acc, order) => { const key = order.proveedor?.nombre || 'Sin proveedor'; acc[key] ||= { nombre: key, total: 0 }; acc[key].total += decimal(order.total); return acc; }, {}));
-  const byStatus = Object.values(orders.reduce((acc, order) => { acc[order.estado] ||= { estado: order.estado, cantidad: 0, total: 0 }; acc[order.estado].cantidad += 1; acc[order.estado].total += decimal(order.total); return acc; }, {}));
-  res.json({ bySupplier, byStatus });
+// Las compras se agrupan por fecha de emisión en la hora local de Rosario (UTC−03:00).
+const reportMonth = (date) => new Date(date.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 7);
+
+app.get('/api/reports/purchases', permit('reports:read'), async (req, res) => {
+  if (isRequester(req.user)) return res.status(403).json({ error: 'No tiene permisos para consultar reportes.' });
+  const { proveedorId, mes } = req.query;
+  if (proveedorId !== undefined && (typeof proveedorId !== 'string' || !/^\d+$/.test(proveedorId)
+      || !Number.isSafeInteger(Number(proveedorId)) || Number(proveedorId) < 1 || Number(proveedorId) > 2147483647)) {
+    return res.status(400).json({ error: 'Proveedor inválido.' });
+  }
+  if (mes !== undefined && (typeof mes !== 'string' || !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(mes))) {
+    return res.status(400).json({ error: 'El mes debe tener el formato AAAA-MM.' });
+  }
+  const from = mes ? new Date(`${mes}-01T03:00:00Z`) : null;
+  const to = from ? new Date(from) : null;
+  if (to) to.setUTCMonth(to.getUTCMonth() + 1);
+
+  const [suppliers, orders] = await Promise.all([
+    prisma.supplier.findMany({ select: { id: true, nombre: true }, orderBy: { nombre: 'asc' } }),
+    prisma.purchaseOrder.findMany({
+      where: {
+        estado: { not: 'CANCELADA' },
+        ...(proveedorId ? { proveedorId: Number(proveedorId) } : {}),
+        ...(from ? { fechaEmision: { gte: from, lt: to } } : {}),
+      },
+      select: {
+        id: true, numeroOrden: true, fechaEmision: true, estado: true, moneda: true, total: true,
+        proveedor: { select: { id: true, nombre: true } },
+        items: { select: {
+          id: true, cantidad: true, precioUnitario: true, nombreProveedor: true,
+          producto: { select: { descripcion: true } },
+        } },
+      },
+      orderBy: [{ fechaEmision: 'desc' }, { id: 'desc' }],
+    }),
+  ]);
+  const monthly = new Map();
+  const statuses = new Map();
+  for (const order of orders) {
+    const { proveedor, moneda, fechaEmision, estado, ...detail } = order;
+    const month = reportMonth(fechaEmision);
+    const key = JSON.stringify([proveedor?.id, month, moneda]);
+    const group = monthly.get(key) ?? { proveedor, month, moneda, total: new Prisma.Decimal(0), orders: [] };
+    group.total = group.total.plus(order.total);
+    group.orders.push({ ...detail, fechaEmision });
+    monthly.set(key, group);
+
+    const statusKey = JSON.stringify([estado, moneda]);
+    const status = statuses.get(statusKey) ?? { estado, moneda, cantidad: 0, total: new Prisma.Decimal(0) };
+    status.cantidad++;
+    status.total = status.total.plus(order.total);
+    statuses.set(statusKey, status);
+  }
+  res.json({ suppliers, monthly: [...monthly.values()], byStatus: [...statuses.values()] });
 });
 
 app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'Error interno del servidor.' }); });
