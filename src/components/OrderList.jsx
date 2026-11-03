@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download, Filter, Search } from 'lucide-react';
 import { generatePurchaseOrderPdf } from '../purchaseOrderPdf';
+import OrderForm from './OrderForm';
 import AdminRequestTracking from './AdminRequestTracking';
 
 const STATUS_LABELS = { BORRADOR: 'Borrador', ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECIBIDA: 'Recibida', CANCELADA: 'Cancelada' };
@@ -13,6 +14,8 @@ export default function OrderList({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [trackingOrderId, setTrackingOrderId] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [openingOrder, setOpeningOrder] = useState(false);
   const canManageRequest = ['SYSTEM_ADMIN', 'BUYER'].includes(user?.role);
 
   useEffect(() => { fetch('/api/suppliers').then((response) => response.json()).then(setSuppliers).catch(() => setError('No se pudieron cargar los proveedores.')); }, []);
@@ -26,14 +29,39 @@ export default function OrderList({ user }) {
     if (!response.ok) { const body = await response.json(); return setError(body.error || 'No se pudo actualizar el estado.'); }
     setOrders((current) => current.map((order) => order.id === id ? { ...order, estado } : order));
   };
+  const openEditor = async (id) => {
+    setOpeningOrder(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/orders/${id}`);
+      const order = await response.json();
+      if (!response.ok) throw new Error(order.error);
+      if (order.estado !== 'BORRADOR') {
+        setOrders((current) => current.map((entry) => entry.id === id ? { ...entry, estado: order.estado } : entry));
+        throw new Error('La orden solo puede editarse mientras está en estado BORRADOR.');
+      }
+      setEditingOrder(order);
+      window.scrollTo({ top: 0 });
+    } catch (error) {
+      setError(error.message || 'No se pudo abrir la orden.');
+    } finally {
+      setOpeningOrder(false);
+    }
+  };
   const generatePdf = async (id) => { setError(''); try { await generatePurchaseOrderPdf(id); } catch (pdfError) { setError(pdfError.message); } };
   const money = (order) => { try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: order.moneda || 'ARS' }).format(Number(order.total)); } catch { return `${order.moneda || 'ARS'} ${Number(order.total).toFixed(2)}`; } };
+
+  if (editingOrder) return <OrderForm order={editingOrder} onCancel={() => setEditingOrder(null)} onCreated={(updated) => {
+    setOrders((current) => current.map((order) => order.id === updated.id
+      ? { ...updated, _count: { items: updated.items.length } } : order));
+    setEditingOrder(null);
+  }} />;
 
   return <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
     <div className="border-b border-slate-200 p-5"><div className="grid gap-3 md:grid-cols-3"><label className="relative"><Search className="absolute left-3 top-2.5 text-slate-400" size={18}/><input aria-label="Buscar orden" name="q" value={filters.q} onChange={update} placeholder="Orden o proveedor..." className="field pl-10" /></label><select aria-label="Estado" name="estado" value={filters.estado} onChange={update} className="field"><option value="">Todos los estados</option>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select aria-label="Proveedor" name="proveedorId" value={filters.proveedorId} onChange={update} className="field"><option value="">Todos los proveedores</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}</select></div></div>
     {error && <p className="m-5 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-4">Número</th><th className="p-4">Proveedor</th><th className="p-4">Emisión</th><th className="p-4">Ítems</th><th className="p-4">Total</th><th className="p-4">Estado</th><th className="p-4">PDF</th>{canManageRequest && <th className="p-4">Solicitud</th>}</tr></thead><tbody className="divide-y divide-slate-100">
-      {loading ? <tr><td colSpan={canManageRequest ? 8 : 7} className="p-8 text-center text-slate-500">Cargando órdenes...</td></tr> : orders.length === 0 ? <tr><td colSpan={canManageRequest ? 8 : 7} className="p-8 text-center text-slate-500"><Filter className="mx-auto mb-2" />No hay órdenes para estos filtros.</td></tr> : orders.map((order) => <tr key={order.id} className="hover:bg-slate-50"><td className="p-4 font-semibold text-slate-800">{order.numeroOrden}</td><td className="p-4">{order.proveedor?.nombre || 'Sin proveedor'}</td><td className="p-4">{new Date(order.fechaEmision).toLocaleDateString('es-AR')}</td><td className="p-4">{order._count.items}</td><td className="p-4 font-medium">{money(order)}</td><td className="p-4"><select aria-label={`Estado de ${order.numeroOrden}`} value={order.estado} onChange={(event) => updateStatus(order.id, event.target.value)} className={`rounded-full border-0 px-2.5 py-1 text-xs font-semibold ${STATUS_COLORS[order.estado]}`}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td><td className="p-4"><button type="button" onClick={() => generatePdf(order.id)} className="btn-secondary px-3 py-2" title="Generar PDF"><Download size={16}/> PDF</button></td>{canManageRequest && <td className="p-4"><button type="button" className="btn-secondary" onClick={() => setTrackingOrderId(order.id)}>Seguimiento</button></td>}</tr>)}
+      {loading ? <tr><td colSpan={canManageRequest ? 8 : 7} className="p-8 text-center text-slate-500">Cargando órdenes...</td></tr> : orders.length === 0 ? <tr><td colSpan={canManageRequest ? 8 : 7} className="p-8 text-center text-slate-500"><Filter className="mx-auto mb-2" />No hay órdenes para estos filtros.</td></tr> : orders.map((order) => <tr key={order.id} className="hover:bg-slate-50"><td className="p-4 font-semibold text-slate-800">{order.numeroOrden}</td><td className="p-4">{order.proveedor?.nombre || 'Sin proveedor'}</td><td className="p-4">{new Date(order.fechaEmision).toLocaleDateString('es-AR')}</td><td className="p-4">{order._count.items}</td><td className="p-4 font-medium">{money(order)}</td><td className="p-4"><select aria-label={`Estado de ${order.numeroOrden}`} value={order.estado} onChange={(event) => updateStatus(order.id, event.target.value)} className={`rounded-full border-0 px-2.5 py-1 text-xs font-semibold ${STATUS_COLORS[order.estado]}`}>{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td><td className="p-4"><button type="button" onClick={() => generatePdf(order.id)} className="btn-secondary px-3 py-2" title="Generar PDF"><Download size={16}/> PDF</button></td>{canManageRequest && <td className="p-4"><div className="flex flex-wrap gap-2">{order.estado === 'BORRADOR' && user.permissions.includes('orders:buy') && <><button type="button" className="btn-secondary" disabled={openingOrder} onClick={() => openEditor(order.id)}>Editar orden</button><button type="button" className="btn-secondary" onClick={() => updateStatus(order.id, 'ENVIADA')}>Enviar</button></>}<button type="button" className="btn-secondary" onClick={() => setTrackingOrderId(order.id)}>Seguimiento</button></div></td>}</tr>)}
     </tbody></table></div>
     {trackingOrderId && <AdminRequestTracking user={user} orderId={trackingOrderId} suppliers={suppliers} onClose={() => setTrackingOrderId(null)} onUpdated={(updated) => setOrders((current) => current.map((order) => order.id === updated.id ? { ...order, proveedor: updated.proveedor, proveedorId: updated.proveedorId, requesterVisibleStatus: updated.requesterVisibleStatus } : order))} />}
   </section>;

@@ -13,6 +13,7 @@ const prisma = new PrismaClient();
 const PORT = Number(process.env.PORT || 4000);
 const TAX_RATE = Number(process.env.TAX_RATE || 0.21);
 const FREE_ITEM_CODE = '__ITEM_LIBRE_OC__';
+const DRAFT_EDIT_ERROR = 'La orden solo puede editarse mientras está en estado BORRADOR.';
 
 app.use(cors());
 app.use(express.json({ limit: '12mb' }));
@@ -324,76 +325,89 @@ async function createRequesterOrder(req, res) {
   return res.status(201).json(safeRequestOrder(order));
 }
 
+async function buildOrderData(db, body) {
+  const {
+    proveedorId, fechaEntregaEsperada, lugarEntrega, observaciones, items,
+    proveedorRazonSocial, proveedorTaxId, proveedorContacto, proveedorDireccion,
+    proveedorDatosContacto, porcentajeImpuestos, descuentos, moneda,
+    condicionesPago, metodoEnvio, direccionFacturacion, autorizadoPor,
+    firmaAutorizacion, terminosCondiciones,
+  } = body;
+  if (!Number.isInteger(proveedorId)) throw new Error('Debe seleccionar un proveedor.');
+  if (!Array.isArray(items) || items.length === 0) throw new Error('La orden debe tener al menos un ítem.');
+  const proveedor = await db.supplier.findUnique({ where: { id: proveedorId } });
+  if (!proveedor) throw new Error('El proveedor seleccionado no existe.');
+  if (items.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('Uno de los ítems no es válido.');
+  const catalogItems = items.filter((item) => item.tipo !== 'LIBRE');
+  const freeItems = items.filter((item) => item.tipo === 'LIBRE');
+  const productIds = catalogItems.map((item) => Number(item.productoId));
+  const products = await db.item.findMany({ where: { id: { in: productIds } }, include: { ofertas: true } });
+  if (products.length !== new Set(productIds).size) throw new Error('Uno o más productos no existen.');
+  const freeProduct = freeItems.length ? await db.item.upsert({
+    where: { codigo: FREE_ITEM_CODE },
+    update: {},
+    create: { codigo: FREE_ITEM_CODE, descripcion: 'Ítem libre de orden de compra', estado: 'INACTIVO' },
+  }) : null;
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const lineas = items.map((item) => {
+    const cantidad = Number(item.cantidad);
+    const precioIngresado = Number(item.precioUnitario);
+    if (item.tipo === 'LIBRE') {
+      const descripcion = requiredString(item.descripcionLibre, 'descripción del ítem libre');
+      if (descripcion.length > 500) throw new Error('La descripción del ítem libre admite hasta 500 caracteres.');
+      if (!(cantidad > 0)) throw new Error('La cantidad del ítem libre debe ser mayor a cero.');
+      if (!(precioIngresado > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
+      const codigo = optionalString(item.codigoLibre);
+      if (codigo && codigo.length > 100) throw new Error('El código del ítem libre admite hasta 100 caracteres.');
+      return { productoId: freeProduct.id, cantidad, precioUnitario: precioIngresado, subtotalLinea: cantidad * precioIngresado, codigoProveedor: codigo || '—', nombreProveedor: descripcion };
+    }
+    const producto = productById.get(Number(item.productoId));
+    if (!producto || producto.codigo === FREE_ITEM_CODE || !(cantidad > 0)) throw new Error('Cada ítem debe tener producto y cantidad mayor a cero.');
+    const precioUnitario = item.precioUnitario == null ? decimal(producto.precioUnitario) : Number(item.precioUnitario);
+    if (!(precioUnitario > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
+    const equivalencia = producto.ofertas.find((oferta) => oferta.proveedorId === proveedorId);
+    return {
+      productoId: producto.id, cantidad, precioUnitario, subtotalLinea: cantidad * precioUnitario,
+      codigoProveedor: equivalencia?.codigoProveedor || producto.codigo,
+      nombreProveedor: equivalencia?.nombreProveedor || producto.descripcion,
+    };
+  });
+  const subtotal = lineas.reduce((sum, item) => sum + item.subtotalLinea, 0);
+  const tasa = porcentajeImpuestos === '' || porcentajeImpuestos == null ? TAX_RATE * 100 : Number(porcentajeImpuestos);
+  const descuento = descuentos === '' || descuentos == null ? 0 : Number(descuentos);
+  if (!Number.isFinite(tasa) || tasa < 0 || tasa > 100) throw new Error('El porcentaje de impuestos debe estar entre 0 y 100.');
+  if (!Number.isFinite(descuento) || descuento < 0 || descuento > subtotal) throw new Error('El descuento debe ser válido y no superar el subtotal.');
+  const impuestos = subtotal * tasa / 100;
+  const fechaEntrega = fechaEntregaEsperada ? new Date(`${fechaEntregaEsperada}T12:00:00`) : null;
+  if (fechaEntrega && Number.isNaN(fechaEntrega.getTime())) throw new Error('La fecha de entrega no es válida.');
+  if (![subtotal, impuestos, subtotal + impuestos - descuento].every(Number.isFinite)) throw new Error('Los importes de la orden deben ser finitos.');
+  const data = {
+    proveedorId, fechaEntregaEsperada: fechaEntrega,
+    lugarEntrega: optionalString(lugarEntrega), observaciones: optionalString(observaciones),
+    proveedorRazonSocial: optionalString(proveedorRazonSocial) || proveedor.razonSocial || proveedor.nombre,
+    proveedorTaxId: optionalString(proveedorTaxId) || proveedor.taxId,
+    proveedorContacto: optionalString(proveedorContacto) || proveedor.contacto,
+    proveedorDireccion: optionalString(proveedorDireccion) || [proveedor.direccion, proveedor.ciudad, proveedor.provincia, proveedor.pais].filter(Boolean).join(', ') || null,
+    proveedorDatosContacto: optionalString(proveedorDatosContacto) || [proveedor.email, proveedor.telefono].filter(Boolean).join(' · ') || null,
+    porcentajeImpuestos: tasa, descuentos: descuento, moneda: optionalString(moneda) || 'ARS',
+    condicionesPago: optionalString(condicionesPago), metodoEnvio: optionalString(metodoEnvio),
+    direccionFacturacion: optionalString(direccionFacturacion), autorizadoPor: optionalString(autorizadoPor),
+    firmaAutorizacion: optionalString(firmaAutorizacion), terminosCondiciones: optionalString(terminosCondiciones),
+    subtotal, impuestos, total: subtotal + impuestos - descuento,
+  };
+  return { data, lineas };
+}
+
 app.post('/api/orders', permit('orders:create'), async (req, res) => {
   try {
     if (isRequester(req.user)) return await createRequesterOrder(req, res);
-    const {
-      proveedorId, fechaEntregaEsperada, lugarEntrega, observaciones, items,
-      proveedorRazonSocial, proveedorTaxId, proveedorContacto, proveedorDireccion,
-      proveedorDatosContacto, porcentajeImpuestos, descuentos, moneda,
-      condicionesPago, metodoEnvio, direccionFacturacion, autorizadoPor,
-      firmaAutorizacion, terminosCondiciones,
-    } = req.body;
-    if (!Number.isInteger(proveedorId)) throw new Error('Debe seleccionar un proveedor.');
-    if (!Array.isArray(items) || items.length === 0) throw new Error('La orden debe tener al menos un ítem.');
-    const proveedor = await prisma.supplier.findUnique({ where: { id: proveedorId } });
-    if (!proveedor) throw new Error('El proveedor seleccionado no existe.');
-    const catalogItems = items.filter((item) => item.tipo !== 'LIBRE');
-    const freeItems = items.filter((item) => item.tipo === 'LIBRE');
-    const productIds = catalogItems.map((item) => Number(item.productoId));
-    const products = await prisma.item.findMany({ where: { id: { in: productIds } }, include: { ofertas: true } });
-    if (products.length !== new Set(productIds).size) throw new Error('Uno o más productos no existen.');
-    const freeProduct = freeItems.length ? await prisma.item.upsert({
-      where: { codigo: FREE_ITEM_CODE },
-      update: {},
-      create: { codigo: FREE_ITEM_CODE, descripcion: 'Ítem libre de orden de compra', estado: 'INACTIVO' },
-    }) : null;
-    const productById = new Map(products.map((product) => [product.id, product]));
-    const lineas = items.map((item) => {
-      const cantidad = Number(item.cantidad);
-      const precioIngresado = Number(item.precioUnitario);
-      if (item.tipo === 'LIBRE') {
-        const descripcion = requiredString(item.descripcionLibre, 'descripción del ítem libre');
-        if (descripcion.length > 500) throw new Error('La descripción del ítem libre admite hasta 500 caracteres.');
-        if (!(cantidad > 0)) throw new Error('La cantidad del ítem libre debe ser mayor a cero.');
-        if (!(precioIngresado > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
-        const codigo = optionalString(item.codigoLibre);
-        if (codigo && codigo.length > 100) throw new Error('El código del ítem libre admite hasta 100 caracteres.');
-        return { productoId: freeProduct.id, cantidad, precioUnitario: precioIngresado, subtotalLinea: cantidad * precioIngresado, codigoProveedor: codigo || '—', nombreProveedor: descripcion };
-      }
-      const producto = productById.get(Number(item.productoId));
-      if (!producto || !(cantidad > 0)) throw new Error('Cada ítem debe tener producto y cantidad mayor a cero.');
-      const precioUnitario = item.precioUnitario == null ? decimal(producto.precioUnitario) : Number(item.precioUnitario);
-      if (!(precioUnitario > 0)) throw new Error('El precio unitario debe ser mayor a cero.');
-      const equivalencia = producto.ofertas.find((oferta) => oferta.proveedorId === proveedorId);
-      return {
-        productoId: producto.id, cantidad, precioUnitario, subtotalLinea: cantidad * precioUnitario,
-        codigoProveedor: equivalencia?.codigoProveedor || producto.codigo,
-        nombreProveedor: equivalencia?.nombreProveedor || producto.descripcion,
-      };
-    });
-    const subtotal = lineas.reduce((sum, item) => sum + item.subtotalLinea, 0);
-    const tasa = porcentajeImpuestos === '' || porcentajeImpuestos == null ? TAX_RATE * 100 : Number(porcentajeImpuestos);
-    const descuento = descuentos === '' || descuentos == null ? 0 : Number(descuentos);
-    if (!Number.isFinite(tasa) || tasa < 0 || tasa > 100) throw new Error('El porcentaje de impuestos debe estar entre 0 y 100.');
-    if (!Number.isFinite(descuento) || descuento < 0 || descuento > subtotal) throw new Error('El descuento debe ser válido y no superar el subtotal.');
-    const impuestos = subtotal * tasa / 100;
-    const fechaEntrega = fechaEntregaEsperada ? new Date(`${fechaEntregaEsperada}T12:00:00`) : null;
-    if (fechaEntrega && Number.isNaN(fechaEntrega.getTime())) throw new Error('La fecha de entrega no es válida.');
-    const provisional = `PENDIENTE-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const { data, lineas } = await buildOrderData(prisma, req.body);
     const baseData = {
-      numeroOrden: provisional, proveedorId, requestedById: req.user.id, costCenter: optionalString(req.body.costCenter) || req.user.costCenter, fechaEntregaEsperada: fechaEntrega,
-      lugarEntrega: optionalString(lugarEntrega), observaciones: optionalString(observaciones),
-      proveedorRazonSocial: optionalString(proveedorRazonSocial) || proveedor.razonSocial || proveedor.nombre,
-      proveedorTaxId: optionalString(proveedorTaxId) || proveedor.taxId,
-      proveedorContacto: optionalString(proveedorContacto) || proveedor.contacto,
-      proveedorDireccion: optionalString(proveedorDireccion) || [proveedor.direccion, proveedor.ciudad, proveedor.provincia, proveedor.pais].filter(Boolean).join(', ') || null,
-      proveedorDatosContacto: optionalString(proveedorDatosContacto) || [proveedor.email, proveedor.telefono].filter(Boolean).join(' · ') || null,
-      porcentajeImpuestos: tasa, descuentos: descuento, moneda: optionalString(moneda) || 'ARS',
-      condicionesPago: optionalString(condicionesPago), metodoEnvio: optionalString(metodoEnvio),
-      direccionFacturacion: optionalString(direccionFacturacion), autorizadoPor: optionalString(autorizadoPor),
-      firmaAutorizacion: optionalString(firmaAutorizacion), terminosCondiciones: optionalString(terminosCondiciones),
-      subtotal, impuestos, total: subtotal + impuestos - descuento, items: { create: lineas },
+      ...data,
+      numeroOrden: `PENDIENTE-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      requestedById: req.user.id,
+      costCenter: optionalString(req.body.costCenter) || req.user.costCenter,
+      items: { create: lineas },
     };
     const order = await prisma.$transaction(async (tx) => {
       const created = await tx.purchaseOrder.create({ data: baseData });
@@ -432,6 +446,57 @@ app.get('/api/orders/:id', permit('orders:read'), async (req, res) => {
   }
   return res.json(order);
 });
+app.patch('/api/orders/:id', permit('orders:buy'), async (req, res) => {
+  if (!['SYSTEM_ADMIN', 'BUYER'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'No tiene permisos para realizar esta acción.' });
+  }
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Orden inválida.' });
+  try {
+    const order = await prisma.$transaction(async (tx) => {
+      // La escritura condicional comprueba el estado y bloquea la fila hasta el commit.
+      const locked = await tx.purchaseOrder.updateMany({
+        where: { id, estado: 'BORRADOR' },
+        data: { updatedAt: new Date() },
+      });
+      if (!locked.count) {
+        const exists = await tx.purchaseOrder.findUnique({ where: { id }, select: { id: true } });
+        if (!exists) throw Object.assign(new Error('Orden no encontrada.'), { statusCode: 404 });
+        throw Object.assign(new Error(DRAFT_EDIT_ERROR), { statusCode: 409 });
+      }
+      const previous = await tx.purchaseOrder.findUnique({ where: { id }, include: { items: true } });
+      const { data, lineas } = await buildOrderData(tx, req.body);
+      data.costCenter = optionalString(req.body.costCenter);
+      const updated = await tx.purchaseOrder.update({
+        where: { id },
+        data: { ...data, items: { deleteMany: {}, create: lineas } },
+        include: includesOrder,
+      });
+      const fields = Object.keys(data).filter((key) => String(previous[key]) !== String(updated[key]));
+      const summarizeLines = (items) => items.map(({ productoId, cantidad, precioUnitario }) => ({
+        productoId, cantidad: Number(cantidad), precioUnitario: Number(precioUnitario),
+      }));
+      const before = summarizeLines(previous.items);
+      const after = summarizeLines(updated.items);
+      const linesChanged = JSON.stringify(before) !== JSON.stringify(after)
+        || previous.items.some((line, index) => line.nombreProveedor !== updated.items[index]?.nombreProveedor
+          || line.codigoProveedor !== updated.items[index]?.codigoProveedor);
+      if (linesChanged) fields.push('items');
+      await tx.auditLog.create({ data: {
+        userId: req.user.id, action: 'ORDER_UPDATED', entity: 'PURCHASE_ORDER', entityId: String(id), ipAddress: req.ip,
+        details: JSON.stringify({
+          fields,
+          proveedorId: [previous.proveedorId, updated.proveedorId],
+          fechaEntregaEsperada: [previous.fechaEntregaEsperada, updated.fechaEntregaEsperada],
+          total: [Number(previous.total), Number(updated.total)],
+          ...(linesChanged ? { items: { before, after } } : {}),
+        }),
+      } });
+      return updated;
+    });
+    res.json(order);
+  } catch (e) { handleError(res, e); }
+});
 app.patch('/api/orders/:id/request-status', async (req, res) => {
   try {
     const update = validateVisibleStatusUpdate(req.user, req.body);
@@ -453,17 +518,32 @@ app.patch('/api/orders/:id/suggested-supplier', async (req, res) => {
     const supplierId = req.body.proveedorId === '' || req.body.proveedorId == null ? null : Number(req.body.proveedorId);
     const supplier = supplierId ? await prisma.supplier.findUnique({ where: { id: supplierId } }) : null;
     if (supplierId && (!Number.isInteger(supplierId) || !supplier)) throw new Error('Proveedor inválido.');
-    const order = await prisma.purchaseOrder.update({ where: { id: Number(req.params.id) }, data: {
-      proveedorId: supplier?.id || null,
-      proveedorRazonSocial: supplier?.razonSocial || supplier?.nombre || null,
-      proveedorTaxId: supplier?.taxId || null,
-      proveedorContacto: supplier?.contacto || null,
-      proveedorDireccion: supplier ? [supplier.direccion, supplier.ciudad, supplier.provincia, supplier.pais].filter(Boolean).join(', ') || null : null,
-      proveedorDatosContacto: supplier ? [supplier.email, supplier.telefono].filter(Boolean).join(' · ') || null : null,
-    }, include: includesOrder });
+    const id = Number(req.params.id);
+    const requestCreated = await prisma.auditLog.findFirst({
+      where: { action: 'REQUEST_CREATED', entity: 'PURCHASE_ORDER', entityId: String(id) },
+      select: { id: true },
+    });
+    const order = await prisma.purchaseOrder.update({
+      where: { id, ...(requestCreated ? {} : { estado: 'BORRADOR' }) },
+      data: {
+        proveedorId: supplier?.id || null,
+        proveedorRazonSocial: supplier?.razonSocial || supplier?.nombre || null,
+        proveedorTaxId: supplier?.taxId || null,
+        proveedorContacto: supplier?.contacto || null,
+        proveedorDireccion: supplier ? [supplier.direccion, supplier.ciudad, supplier.provincia, supplier.pais].filter(Boolean).join(', ') || null : null,
+        proveedorDatosContacto: supplier ? [supplier.email, supplier.telefono].filter(Boolean).join(' · ') || null : null,
+      },
+      include: includesOrder,
+    });
     await audit(req, 'REQUEST_SUPPLIER_UPDATED', 'PURCHASE_ORDER', order.id, { supplierId });
     res.json(order);
-  } catch (e) { handleError(res, e); }
+  } catch (e) {
+    if (e.code === 'P2025') {
+      const exists = await prisma.purchaseOrder.findUnique({ where: { id: Number(req.params.id) }, select: { id: true } });
+      return exists ? res.status(409).json({ error: DRAFT_EDIT_ERROR }) : res.status(404).json({ error: 'Orden no encontrada.' });
+    }
+    handleError(res, e);
+  }
 });
 app.patch('/api/orders/:id/status', permit('orders:approve','orders:buy','orders:receive','orders:finance'), async (req, res) => {
   try {
@@ -503,4 +583,5 @@ if (process.env.NODE_ENV === 'production') {
     next();
   });
 }
-app.listen(PORT, () => console.log(`API disponible en http://localhost:${PORT}`));
+if (require.main === module) app.listen(PORT, () => console.log(`API disponible en http://localhost:${PORT}`));
+module.exports = { app, prisma };
